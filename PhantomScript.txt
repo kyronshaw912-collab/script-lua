@@ -1,6 +1,6 @@
 -- EXECUTION TRACKING (SEND TO YOUR BOT)
 local success, err = pcall(function()
-    local url = "http://127.0.0.1:3000/report-execution"
+    local url = "http://86.11.23.18:3000/report-execution"
 
     local data = {
         discord_id = getgenv().NamelessUserId or "unknown",
