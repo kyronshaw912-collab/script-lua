@@ -1,0 +1,1294 @@
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local UIS=game:GetService("UserInputService")
+local TS=game:GetService("TweenService")
+local LP=Players.LocalPlayer
+local Cam=workspace.CurrentCamera
+local function getChar(p) return (p or LP).Character end
+local function getHRP(p) local c=getChar(p) return c and c:FindFirstChild("HumanoidRootPart") end
+local function getHum(p) local c=getChar(p) return c and c:FindFirstChildOfClass("Humanoid") end
+local function w2s(pos) local v,on=Cam:WorldToViewportPoint(pos) return Vector2.new(v.X,v.Y),on end
+local Config={
+FlySpeed=80,SprintMult=2.5,Smoothness=0.15,
+FlyKey=Enum.KeyCode.F,SprintKey=Enum.KeyCode.LeftShift,
+UpKey=Enum.KeyCode.Space,DownKey=Enum.KeyCode.LeftControl,
+WalkSpeed=50,DefaultSpeed=16,SpeedKey=Enum.KeyCode.G,
+ESPKey=Enum.KeyCode.Z,MaxDist=1000,
+ShowBox=true,ShowName=true,ShowHealth=true,ShowTracer=true,
+ShowDistance=true,ShowSkeleton=true,ShowChams=true,
+RainbowESP=false,RainbowSpeed=1,RainbowMode=1,
+BoxColor=Color3.fromRGB(255,60,60),TracerColor=Color3.fromRGB(255,60,60),
+SkeletonColor=Color3.fromRGB(255,200,80),ChamsColor=Color3.fromRGB(0,140,255),
+ChamsFill=Color3.fromRGB(0,80,200),ChamsFillAlpha=0.6,
+AimbotKey=Enum.KeyCode.T,AimbotFOV=120,AimbotSmooth=0.25,
+AimbotTeamCheck=false,AimbotWallCheck=true,ShowFOVCircle=true,AimbotBone="Head",
+SilentAimKey=Enum.KeyCode.Y,SilentAimActive=false,SilentHitChance=100,
+NoclipKey=Enum.KeyCode.N,MinimizeKey=Enum.KeyCode.Insert,
+}
+local Fly={active=false,sprinting=false,vel=Vector3.new(0,0,0),bv=nil,bg=nil,conn=nil}
+local Speed={active=false,conn=nil}
+local ESP={active=false,objects={},conn=nil}
+local Aim={active=false,conn=nil}
+local Noclip={active=false,conn=nil}
+local SilentAim={conn=nil}
+local function StopNoclip()
+Noclip.active=false
+if Noclip.conn then Noclip.conn:Disconnect() Noclip.conn=nil end
+end
+local function StartNoclip()
+Noclip.active=true
+Noclip.conn=RunService.Stepped:Connect(function()
+local c=getChar()
+if not c then return end
+for _,p in ipairs(c:GetDescendants()) do
+if p:IsA("BasePart") then p.CanCollide=false end
+end
+end)
+end
+local function ToggleNoclip() if Noclip.active then StopNoclip() else StartNoclip() end end
+local function StopFly()
+Fly.active=false
+if Fly.conn then Fly.conn:Disconnect() Fly.conn=nil end
+if Fly.bv then Fly.bv:Destroy() Fly.bv=nil end
+if Fly.bg then Fly.bg:Destroy() Fly.bg=nil end
+local h=getHum() if h then h.PlatformStand=false end
+Fly.vel=Vector3.new(0,0,0)
+end
+local function StartFly()
+local r=getHRP() local h=getHum()
+if not r or not h then return end
+Fly.active=true
+h.PlatformStand=true
+Fly.bv=Instance.new("BodyVelocity")
+Fly.bv.Velocity=Vector3.new(0,0,0)
+Fly.bv.MaxForce=Vector3.new(1e5,1e5,1e5)
+Fly.bv.P=1e4
+Fly.bv.Parent=r
+Fly.bg=Instance.new("BodyGyro")
+Fly.bg.MaxTorque=Vector3.new(1e5,1e5,1e5)
+Fly.bg.P=1e4
+Fly.bg.Parent=r
+Fly.conn=RunService.Heartbeat:Connect(function()
+local r2=getHRP() if not r2 then return end
+local spd=Config.FlySpeed*(Fly.sprinting and Config.SprintMult or 1)
+local cf=Cam.CFrame
+local dir=Vector3.new(0,0,0)
+if UIS:IsKeyDown(Enum.KeyCode.W) then dir=dir+cf.LookVector end
+if UIS:IsKeyDown(Enum.KeyCode.S) then dir=dir-cf.LookVector end
+if UIS:IsKeyDown(Enum.KeyCode.A) then dir=dir-cf.RightVector end
+if UIS:IsKeyDown(Enum.KeyCode.D) then dir=dir+cf.RightVector end
+if UIS:IsKeyDown(Config.UpKey) then dir=dir+Vector3.new(0,1,0) end
+if UIS:IsKeyDown(Config.DownKey) then dir=dir-Vector3.new(0,1,0) end
+local target=dir.Magnitude>0 and dir.Unit*spd or Vector3.new(0,0,0)
+Fly.vel=Fly.vel:Lerp(target,Config.Smoothness)
+Fly.bv.Velocity=Fly.vel
+Fly.bg.CFrame=cf
+end)
+end
+local function ToggleFly() if Fly.active then StopFly() else StartFly() end end
+local function StopSpeed()
+Speed.active=false
+if Speed.conn then Speed.conn:Disconnect() Speed.conn=nil end
+local h=getHum() if h then h.WalkSpeed=Config.DefaultSpeed end
+end
+local function StartSpeed()
+Speed.active=true
+Speed.conn=RunService.Heartbeat:Connect(function()
+local h=getHum() if h then h.WalkSpeed=Config.WalkSpeed end
+end)
+end
+local function ToggleSpeed() if Speed.active then StopSpeed() else StartSpeed() end end
+local ESPFolder=Instance.new("Folder")
+ESPFolder.Name="NSESPFolder"
+ESPFolder.Parent=workspace
+local TracerGui=Instance.new("ScreenGui")
+TracerGui.Name="NSTracerGui"
+TracerGui.ResetOnSpawn=false
+pcall(function() TracerGui.IgnoreGuiInset=true end)
+TracerGui.Parent=LP.PlayerGui
+local function MakeTracerLine(color)
+local f=Instance.new("Frame",TracerGui)
+f.BackgroundColor3=color or Color3.fromRGB(255,60,60)
+f.BorderSizePixel=0
+f.AnchorPoint=Vector2.new(0,0.5)
+f.Visible=false
+f.ZIndex=5
+return f
+end
+local function SetTracerLine(line,from,to,thickness)
+local diff=to-from
+local length=diff.Magnitude
+if length<1 then line.Visible=false return end
+line.Size=UDim2.new(0,length,0,thickness or 1)
+line.Position=UDim2.new(0,from.X,0,from.Y)
+line.Rotation=math.deg(math.atan2(diff.Y,diff.X))
+line.Visible=true
+end
+local BONE_PAIRS={
+{"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+{"LowerTorso","LeftUpperLeg"},{"LowerTorso","RightUpperLeg"},
+{"LeftUpperLeg","LeftLowerLeg"},{"RightUpperLeg","RightLowerLeg"},
+{"LeftLowerLeg","LeftFoot"},{"RightLowerLeg","RightFoot"},
+{"UpperTorso","LeftUpperArm"},{"UpperTorso","RightUpperArm"},
+{"LeftUpperArm","LeftLowerArm"},{"RightUpperArm","RightLowerArm"},
+{"LeftLowerArm","LeftHand"},{"RightLowerArm","RightHand"},
+{"Head","Torso"},{"Torso","Left Arm"},{"Torso","Right Arm"},
+{"Torso","Left Leg"},{"Torso","Right Leg"},
+}
+local function MakeESP(player)
+if player==LP then return end
+if ESP.objects[player] then return end
+ESP.objects[player]={chams={},beams={}}
+end
+local function BuildESPOnChar(player)
+local obj=ESP.objects[player]
+if not obj then return end
+local c=getChar(player)
+if not c then return end
+local hrp=c:FindFirstChild("HumanoidRootPart")
+if not hrp then return end
+if obj.billboard then pcall(function() obj.billboard:Destroy() end) end
+if obj.box then pcall(function() obj.box:Destroy() end) end
+for _,b in ipairs(obj.beams) do
+pcall(function() b.attA:Destroy() end)
+pcall(function() b.attB:Destroy() end)
+pcall(function() b.beam:Destroy() end)
+end
+if obj.tracerLine then pcall(function() obj.tracerLine:Destroy() end) end
+obj.beams={}
+obj.tracerLine=nil
+local bb=Instance.new("BillboardGui")
+bb.Name="NSESP"
+bb.Adornee=hrp
+bb.AlwaysOnTop=true
+bb.Size=UDim2.new(0,120,0,44)
+bb.StudsOffsetWorldSpace=Vector3.new(0,3.2,0)
+bb.ResetOnSpawn=false
+bb.Parent=ESPFolder
+local nameBG=Instance.new("Frame",bb)
+nameBG.Size=UDim2.new(1,0,0,20)
+nameBG.BackgroundColor3=Color3.fromRGB(0,0,0)
+nameBG.BackgroundTransparency=0.45
+nameBG.BorderSizePixel=0
+Instance.new("UICorner",nameBG).CornerRadius=UDim.new(0,4)
+local nameLbl=Instance.new("TextLabel",nameBG)
+nameLbl.Size=UDim2.new(1,0,1,0)
+nameLbl.BackgroundTransparency=1
+nameLbl.Text=player.DisplayName
+nameLbl.TextColor3=Color3.new(1,1,1)
+nameLbl.TextSize=13
+nameLbl.Font=Enum.Font.GothamBold
+local hpTrack=Instance.new("Frame",bb)
+hpTrack.Size=UDim2.new(1,0,0,6)
+hpTrack.Position=UDim2.new(0,0,0,23)
+hpTrack.BackgroundColor3=Color3.fromRGB(30,30,30)
+hpTrack.BackgroundTransparency=0.3
+hpTrack.BorderSizePixel=0
+Instance.new("UICorner",hpTrack).CornerRadius=UDim.new(1,0)
+local hpFill=Instance.new("Frame",hpTrack)
+hpFill.Size=UDim2.new(1,0,1,0)
+hpFill.BackgroundColor3=Color3.fromRGB(80,255,120)
+hpFill.BorderSizePixel=0
+Instance.new("UICorner",hpFill).CornerRadius=UDim.new(1,0)
+local distLbl=Instance.new("TextLabel",bb)
+distLbl.Size=UDim2.new(1,0,0,12)
+distLbl.Position=UDim2.new(0,0,0,32)
+distLbl.BackgroundTransparency=1
+distLbl.Text=""
+distLbl.TextColor3=Color3.fromRGB(200,200,200)
+distLbl.TextSize=11
+distLbl.Font=Enum.Font.Gotham
+obj.billboard=bb
+obj.nameBG=nameBG
+obj.nameLbl=nameLbl
+obj.hpTrack=hpTrack
+obj.hpFill=hpFill
+obj.distLbl=distLbl
+local box=Instance.new("SelectionBox")
+box.Adornee=c
+box.Color3=Config.BoxColor
+box.LineThickness=0.03
+box.SurfaceTransparency=1
+box.Parent=ESPFolder
+obj.box=box
+for _,pair in ipairs(BONE_PAIRS) do
+local pA=c:FindFirstChild(pair[1])
+local pB=c:FindFirstChild(pair[2])
+if pA and pB then
+local attA=Instance.new("Attachment",pA)
+local attB=Instance.new("Attachment",pB)
+local beam=Instance.new("Beam")
+beam.Attachment0=attA
+beam.Attachment1=attB
+beam.Color=ColorSequence.new(Config.SkeletonColor)
+beam.Width0=0.04
+beam.Width1=0.04
+beam.FaceCamera=true
+beam.LightInfluence=0
+beam.Transparency=NumberSequence.new(0)
+beam.Segments=1
+beam.Parent=ESPFolder
+table.insert(obj.beams,{beam=beam,attA=attA,attB=attB})
+end
+end
+obj.tracerLine=MakeTracerLine(Config.TracerColor)
+end
+local function BuildChams(player)
+local obj=ESP.objects[player]
+if not obj then return end
+for _,sb in ipairs(obj.chams) do pcall(function() sb:Destroy() end) end
+obj.chams={}
+local c=getChar(player)
+if not c then return end
+for _,part in ipairs(c:GetDescendants()) do
+if part:IsA("BasePart") and part.Name~="HumanoidRootPart" then
+local sb=Instance.new("SelectionBox")
+sb.Adornee=part
+sb.Color3=Config.ChamsColor
+sb.LineThickness=0.04
+sb.SurfaceTransparency=Config.ChamsFillAlpha
+sb.SurfaceColor3=Config.ChamsFill
+sb.Parent=ESPFolder
+table.insert(obj.chams,sb)
+end
+end
+end
+local function SetChams(obj,on)
+for _,sb in ipairs(obj.chams or {}) do
+sb.SurfaceTransparency=on and Config.ChamsFillAlpha or 1
+sb.LineThickness=on and 0.04 or 0
+end
+end
+local function RemoveESP(player)
+local obj=ESP.objects[player]
+if not obj then return end
+if obj.billboard then pcall(function() obj.billboard:Destroy() end) end
+if obj.box then pcall(function() obj.box:Destroy() end) end
+if obj.tracerLine then pcall(function() obj.tracerLine:Destroy() end) end
+for _,b in ipairs(obj.beams) do
+pcall(function() b.attA:Destroy() end)
+pcall(function() b.attB:Destroy() end)
+pcall(function() b.beam:Destroy() end)
+end
+for _,sb in ipairs(obj.chams) do pcall(function() sb:Destroy() end) end
+ESP.objects[player]=nil
+end
+local rainbowHue=0
+local function UpdateESP()
+local myPos=(getHRP() and getHRP().Position) or Vector3.new(0,0,0)
+local vp=Cam.ViewportSize
+local screenBottom=Vector2.new(vp.X/2,vp.Y)
+if Config.RainbowESP then
+local speeds={0.3,0.8,2.0}
+rainbowHue=(rainbowHue+(speeds[Config.RainbowSpeed] or 0.3))%360
+end
+local rc=nil
+if Config.RainbowESP then
+local t=rainbowHue/360
+local m=Config.RainbowMode
+if m==1 then rc=Color3.fromHSV(t,1,1)
+elseif m==2 then rc=Color3.new(1,0.1+0.4*(math.sin(t*math.pi*2)*0.5+0.5),0.1)
+elseif m==3 then rc=Color3.new(0.1,0.1+0.4*(math.sin(t*math.pi*2)*0.5+0.5),1)
+elseif m==4 then rc=Color3.new(0.1,1,0.1+0.4*(math.sin(t*math.pi*2)*0.5+0.5))
+else rc=Color3.fromHSV(t,1,1) end
+end
+for player,obj in pairs(ESP.objects) do
+local c=getChar(player)
+local h=c and c:FindFirstChildOfClass("Humanoid")
+local hrp=c and c:FindFirstChild("HumanoidRootPart")
+local alive=c and h and hrp and h.Health>0
+local dist=alive and (hrp.Position-myPos).Magnitude or math.huge
+local show=alive and dist<=Config.MaxDist
+if obj.billboard then
+obj.billboard.Enabled=show
+if show then
+if obj.nameBG then obj.nameBG.Visible=Config.ShowName obj.nameBG.BackgroundColor3=Color3.fromRGB(0,0,0) end
+if obj.nameLbl then obj.nameLbl.Text=player.DisplayName obj.nameLbl.TextColor3=rc or Color3.new(1,1,1) end
+if obj.hpTrack then obj.hpTrack.Visible=Config.ShowHealth end
+if obj.hpFill and h then
+local ratio=math.clamp(h.Health/math.max(h.MaxHealth,1),0,1)
+obj.hpFill.Size=UDim2.new(ratio,0,1,0)
+obj.hpFill.BackgroundColor3=Color3.new(math.clamp(2*(1-ratio),0,1),math.clamp(2*ratio,0,1),0)
+end
+if obj.distLbl then
+obj.distLbl.Visible=Config.ShowDistance
+obj.distLbl.Text=string.format("[%d m]",math.floor(dist))
+obj.distLbl.TextColor3=rc or Color3.fromRGB(200,200,200)
+end
+end
+end
+if obj.box then
+obj.box.Visible=show and Config.ShowBox
+if show and Config.ShowBox then obj.box.Color3=rc or Config.BoxColor end
+end
+local showSkel=show and Config.ShowSkeleton
+for _,b in ipairs(obj.beams) do
+if b.beam and b.beam.Parent then
+b.beam.Enabled=showSkel
+if showSkel then b.beam.Color=ColorSequence.new(rc or Config.SkeletonColor) end
+end
+end
+if obj.tracerLine then
+if show and Config.ShowTracer and hrp then
+local sp,on=w2s(hrp.Position)
+if on then
+obj.tracerLine.BackgroundColor3=rc or Config.TracerColor
+SetTracerLine(obj.tracerLine,screenBottom,sp,1)
+else
+obj.tracerLine.Visible=false
+end
+else
+obj.tracerLine.Visible=false
+end
+end
+if show and Config.ShowChams then
+if #obj.chams==0 then BuildChams(player) end
+SetChams(obj,true)
+if rc then
+for _,sb in ipairs(obj.chams) do
+sb.Color3=rc
+sb.SurfaceColor3=Color3.fromHSV(select(1,rc:ToHSV()),0.6,0.4)
+end
+else
+for _,sb in ipairs(obj.chams) do
+sb.Color3=Config.ChamsColor
+sb.SurfaceColor3=Config.ChamsFill
+end
+end
+else
+SetChams(obj,false)
+end
+end
+end
+local function EnableESP()
+ESP.active=true
+for _,p in ipairs(Players:GetPlayers()) do
+MakeESP(p)
+BuildESPOnChar(p)
+BuildChams(p)
+end
+ESP.conn=RunService.Heartbeat:Connect(UpdateESP)
+end
+local function DisableESP()
+ESP.active=false
+if ESP.conn then ESP.conn:Disconnect() ESP.conn=nil end
+for p in pairs(ESP.objects) do RemoveESP(p) end
+end
+local function ToggleESP() if ESP.active then DisableESP() else EnableESP() end end
+local FOVGui=Instance.new("ScreenGui")
+FOVGui.Name="NSFOVCircle"
+FOVGui.ResetOnSpawn=false
+pcall(function() FOVGui.IgnoreGuiInset=true end)
+FOVGui.Parent=LP.PlayerGui
+local FOVRing=Instance.new("Frame",FOVGui)
+FOVRing.AnchorPoint=Vector2.new(0.5,0.5)
+FOVRing.BackgroundTransparency=1
+FOVRing.BorderSizePixel=0
+FOVRing.Visible=false
+local FOVStroke=Instance.new("UIStroke",FOVRing)
+FOVStroke.Color=Color3.fromRGB(255,255,255)
+FOVStroke.Thickness=1.5
+FOVStroke.Transparency=0.3
+Instance.new("UICorner",FOVRing).CornerRadius=UDim.new(1,0)
+RunService.RenderStepped:Connect(function()
+if Aim.active and Config.ShowFOVCircle then
+local r=Config.AimbotFOV
+local vp=Cam.ViewportSize
+FOVRing.Size=UDim2.new(0,r*2,0,r*2)
+FOVRing.Position=UDim2.new(0,vp.X/2,0,vp.Y/2)
+FOVRing.Visible=true
+else
+FOVRing.Visible=false
+end
+end)
+local function IsVisible(targetPos)
+local myC=getChar()
+local origin=Cam.CFrame.Position
+local dir=targetPos-origin
+local params=RaycastParams.new()
+params.FilterDescendantsInstances=myC and {myC} or {}
+params.FilterType=Enum.RaycastFilterType.Exclude
+local result=workspace:Raycast(origin,dir.Unit*dir.Magnitude,params)
+if not result then return true end
+if (result.Position-targetPos).Magnitude<2 then return true end
+return false
+end
+local function GetAimbotTarget()
+local center=Cam.ViewportSize/2
+local bestDist=Config.AimbotFOV
+local bestPart=nil
+for _,p in ipairs(Players:GetPlayers()) do
+if p~=LP then
+if not(Config.AimbotTeamCheck and p.Team==LP.Team) then
+local c=getChar(p)
+local h=c and c:FindFirstChildOfClass("Humanoid")
+if c and h and h.Health>0 then
+local part=c:FindFirstChild(Config.AimbotBone) or c:FindFirstChild("Head") or c:FindFirstChild("HumanoidRootPart")
+if part then
+local sp,on=w2s(part.Position)
+if on then
+local sd=(sp-center).Magnitude
+if sd<=Config.AimbotFOV then
+if not Config.AimbotWallCheck or IsVisible(part.Position) then
+if sd<bestDist then bestDist=sd bestPart=part end
+end
+end
+end
+end
+end
+end
+end
+end
+return bestPart
+end
+pcall(function() RunService:UnbindFromRenderStep("NSAimbot") end)
+local function StartAimbot()
+Aim.active=true
+RunService:BindToRenderStep("NSAimbot",Enum.RenderPriority.Last.Value,function()
+if not Aim.active then return end
+if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
+local target=GetAimbotTarget()
+if not target then return end
+local targetCF=CFrame.new(Cam.CFrame.Position,target.Position)
+Cam.CFrame=Cam.CFrame:Lerp(targetCF,Config.AimbotSmooth)
+end)
+end
+local function StopAimbot()
+Aim.active=false
+pcall(function() RunService:UnbindFromRenderStep("NSAimbot") end)
+if Aim.conn then Aim.conn:Disconnect() Aim.conn=nil end
+end
+local function ToggleAimbot() if Aim.active then StopAimbot() else StartAimbot() end end
+local function ToggleSilentAim()
+Config.SilentAimActive=not Config.SilentAimActive
+end
+Players.PlayerAdded:Connect(function(p)
+p.CharacterAdded:Connect(function()
+wait(0.5)
+if ESP.active then RemoveESP(p) MakeESP(p) BuildESPOnChar(p) BuildChams(p) end
+end)
+end)
+Players.PlayerRemoving:Connect(RemoveESP)
+for _,p in ipairs(Players:GetPlayers()) do
+if p~=LP then
+p.CharacterAdded:Connect(function()
+wait(0.5)
+if ESP.active then RemoveESP(p) MakeESP(p) BuildESPOnChar(p) BuildChams(p) end
+end)
+end
+end
+LP.CharacterAdded:Connect(function()
+StopFly() StopNoclip()
+end)
+UIS.InputEnded:Connect(function(inp)
+if inp.KeyCode==Config.SprintKey then Fly.sprinting=false end
+end)
+local old=LP.PlayerGui:FindFirstChild("NamelessScriptsGUI")
+if old then old:Destroy() end
+local ScreenGui=Instance.new("ScreenGui")
+ScreenGui.Name="NamelessScriptsGUI"
+ScreenGui.ResetOnSpawn=false
+ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+pcall(function() ScreenGui.IgnoreGuiInset=true end)
+ScreenGui.Parent=LP.PlayerGui
+local C={
+bg=Color3.fromRGB(8,8,14),
+surface=Color3.fromRGB(13,13,22),
+surface2=Color3.fromRGB(20,18,32),
+border=Color3.fromRGB(38,32,64),
+accent=Color3.fromRGB(99,62,232),
+accent2=Color3.fromRGB(52,120,255),
+red=Color3.fromRGB(232,62,88),
+green=Color3.fromRGB(62,232,140),
+text=Color3.fromRGB(235,228,255),
+textDim=Color3.fromRGB(125,115,160),
+textFaint=Color3.fromRGB(65,58,95),
+}
+local Main=Instance.new("Frame",ScreenGui)
+Main.Size=UDim2.new(0,282,0,450)
+Main.Position=UDim2.new(0,20,0.5,-225)
+Main.BackgroundColor3=C.bg
+Main.BorderSizePixel=0
+Main.Active=true
+Main.ClipsDescendants=true
+Instance.new("UICorner",Main).CornerRadius=UDim.new(0,14)
+local outerStroke=Instance.new("UIStroke",Main)
+outerStroke.Color=Color3.fromRGB(75,48,195)
+outerStroke.Thickness=1
+outerStroke.Transparency=0.25
+local notifContainer=Instance.new("Frame",ScreenGui)
+notifContainer.Size=UDim2.new(0,272,1,0)
+notifContainer.Position=UDim2.new(1,-282,0,0)
+notifContainer.BackgroundTransparency=1
+notifContainer.BorderSizePixel=0
+local notifLayout=Instance.new("UIListLayout",notifContainer)
+notifLayout.SortOrder=Enum.SortOrder.LayoutOrder
+notifLayout.VerticalAlignment=Enum.VerticalAlignment.Bottom
+notifLayout.Padding=UDim.new(0,6)
+local notifPad=Instance.new("UIPadding",notifContainer)
+notifPad.PaddingBottom=UDim.new(0,14)
+notifPad.PaddingRight=UDim.new(0,6)
+local _notifyEnabled=false
+local notifCount=0
+local function Notify(title,message,color)
+if not _notifyEnabled then return end
+notifCount=notifCount+1
+color=color or C.accent
+local card=Instance.new("Frame",notifContainer)
+card.Size=UDim2.new(1,0,0,56)
+card.BackgroundColor3=Color3.fromRGB(12,10,22)
+card.BorderSizePixel=0
+card.LayoutOrder=notifCount
+card.BackgroundTransparency=1
+card.Position=UDim2.new(0,20,0,0)
+Instance.new("UICorner",card).CornerRadius=UDim.new(0,10)
+local acc=Instance.new("Frame",card)
+acc.Size=UDim2.new(0,3,0.7,0)
+acc.Position=UDim2.new(0,0,0.15,0)
+acc.BackgroundColor3=color
+acc.BorderSizePixel=0
+Instance.new("UICorner",acc).CornerRadius=UDim.new(1,0)
+local cs=Instance.new("UIStroke",card)
+cs.Color=color
+cs.Thickness=1
+cs.Transparency=0.75
+local t=Instance.new("TextLabel",card)
+t.Size=UDim2.new(1,-18,0,22)
+t.Position=UDim2.new(0,14,0,7)
+t.BackgroundTransparency=1
+t.Text=title
+t.TextColor3=C.text
+t.TextSize=13
+t.Font=Enum.Font.GothamBold
+t.TextXAlignment=Enum.TextXAlignment.Left
+t.TextTransparency=1
+local m=Instance.new("TextLabel",card)
+m.Size=UDim2.new(1,-18,0,16)
+m.Position=UDim2.new(0,14,0,29)
+m.BackgroundTransparency=1
+m.Text=message
+m.TextColor3=C.textDim
+m.TextSize=11
+m.Font=Enum.Font.Gotham
+m.TextXAlignment=Enum.TextXAlignment.Left
+m.TextTransparency=1
+TS:Create(card,TweenInfo.new(0.2,Enum.EasingStyle.Quart),{BackgroundTransparency=0.08,Position=UDim2.new(0,0,0,0)}):Play()
+TS:Create(t,TweenInfo.new(0.2),{TextTransparency=0}):Play()
+TS:Create(m,TweenInfo.new(0.2),{TextTransparency=0}):Play()
+spawn(function()
+wait(3.2)
+TS:Create(card,TweenInfo.new(0.25),{BackgroundTransparency=1,Position=UDim2.new(0,16,0,0)}):Play()
+TS:Create(t,TweenInfo.new(0.2),{TextTransparency=1}):Play()
+TS:Create(m,TweenInfo.new(0.2),{TextTransparency=1}):Play()
+wait(0.3)
+card:Destroy()
+end)
+end
+local Header=Instance.new("Frame",Main)
+Header.Size=UDim2.new(1,0,0,60)
+Header.BackgroundColor3=C.surface
+Header.BorderSizePixel=0
+Instance.new("UICorner",Header).CornerRadius=UDim.new(0,14)
+local hfix=Instance.new("Frame",Header)
+hfix.Size=UDim2.new(1,0,0,14)
+hfix.Position=UDim2.new(0,0,1,-14)
+hfix.BackgroundColor3=C.surface
+hfix.BorderSizePixel=0
+local hgrad=Instance.new("UIGradient",Header)
+hgrad.Color=ColorSequence.new{
+ColorSequenceKeypoint.new(0,Color3.fromRGB(105,52,238)),
+ColorSequenceKeypoint.new(0.6,Color3.fromRGB(58,92,240)),
+ColorSequenceKeypoint.new(1,Color3.fromRGB(32,52,175))
+}
+hgrad.Rotation=130
+local titleLbl=Instance.new("TextLabel",Header)
+titleLbl.Size=UDim2.new(1,-80,0,24)
+titleLbl.Position=UDim2.new(0,14,0,10)
+titleLbl.BackgroundTransparency=1
+titleLbl.Text="NAMELESS SCRIPTS"
+titleLbl.TextColor3=Color3.new(1,1,1)
+titleLbl.TextSize=16
+titleLbl.Font=Enum.Font.GothamBold
+titleLbl.TextXAlignment=Enum.TextXAlignment.Left
+local subLbl=Instance.new("TextLabel",Header)
+subLbl.Size=UDim2.new(1,-80,0,13)
+subLbl.Position=UDim2.new(0,14,0,36)
+subLbl.BackgroundTransparency=1
+subLbl.Text="fly - speed - esp - aimbot"
+subLbl.TextColor3=Color3.fromRGB(185,170,255)
+subLbl.TextSize=11
+subLbl.Font=Enum.Font.Gotham
+subLbl.TextXAlignment=Enum.TextXAlignment.Left
+local MinBtn=Instance.new("TextButton",Main)
+MinBtn.Size=UDim2.new(0,26,0,26)
+MinBtn.Position=UDim2.new(1,-36,0,17)
+MinBtn.BackgroundColor3=Color3.new(1,1,1)
+MinBtn.BackgroundTransparency=0.88
+MinBtn.BorderSizePixel=0
+MinBtn.Text="-"
+MinBtn.TextColor3=Color3.fromRGB(200,190,255)
+MinBtn.TextSize=14
+MinBtn.Font=Enum.Font.GothamBold
+MinBtn.AutoButtonColor=false
+MinBtn.ZIndex=10
+Instance.new("UICorner",MinBtn).CornerRadius=UDim.new(1,0)
+do
+local dragging,dragStart,startPos
+Header.InputBegan:Connect(function(inp)
+if inp.UserInputType==Enum.UserInputType.MouseButton1 then
+dragging=true dragStart=inp.Position startPos=Main.Position
+end
+end)
+Header.InputEnded:Connect(function(inp)
+if inp.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end
+end)
+UIS.InputChanged:Connect(function(inp)
+if dragging and inp.UserInputType==Enum.UserInputType.MouseMovement then
+local d=inp.Position-dragStart
+Main.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
+end
+end)
+end
+local TAB_H=36
+local TabBar=Instance.new("Frame",Main)
+TabBar.Size=UDim2.new(1,0,0,TAB_H)
+TabBar.Position=UDim2.new(0,0,0,60)
+TabBar.BackgroundColor3=C.surface
+TabBar.BorderSizePixel=0
+local tabIndicator=Instance.new("Frame",TabBar)
+tabIndicator.Size=UDim2.new(0.5,-4,0.8,0)
+tabIndicator.Position=UDim2.new(0,4,0.1,0)
+tabIndicator.BackgroundColor3=C.surface2
+tabIndicator.BorderSizePixel=0
+Instance.new("UICorner",tabIndicator).CornerRadius=UDim.new(0,6)
+local tiStroke=Instance.new("UIStroke",tabIndicator)
+tiStroke.Color=C.accent
+tiStroke.Thickness=1
+tiStroke.Transparency=0.35
+local tabMain=Instance.new("TextButton",TabBar)
+tabMain.Size=UDim2.new(0.5,-4,0.8,0)
+tabMain.Position=UDim2.new(0,4,0.1,0)
+tabMain.BackgroundTransparency=1
+tabMain.BorderSizePixel=0
+tabMain.Text="MAIN"
+tabMain.TextColor3=C.text
+tabMain.TextSize=11
+tabMain.Font=Enum.Font.GothamBold
+tabMain.AutoButtonColor=false
+local tabVisuals=Instance.new("TextButton",TabBar)
+tabVisuals.Size=UDim2.new(0.5,-4,0.8,0)
+tabVisuals.Position=UDim2.new(0.5,0,0.1,0)
+tabVisuals.BackgroundTransparency=1
+tabVisuals.BorderSizePixel=0
+tabVisuals.Text="VISUALS"
+tabVisuals.TextColor3=C.textDim
+tabVisuals.TextSize=11
+tabVisuals.Font=Enum.Font.GothamBold
+tabVisuals.AutoButtonColor=false
+local function MakePage()
+local sf=Instance.new("ScrollingFrame",Main)
+sf.Size=UDim2.new(1,0,1,-(60+TAB_H+1))
+sf.Position=UDim2.new(0,0,0,60+TAB_H+1)
+sf.BackgroundTransparency=1
+sf.BorderSizePixel=0
+sf.ScrollBarThickness=2
+sf.ScrollBarImageColor3=C.accent
+sf.CanvasSize=UDim2.new(0,0,0,2000)
+sf.ScrollingDirection=Enum.ScrollingDirection.Y
+sf.ElasticBehavior=Enum.ElasticBehavior.Never
+sf.ClipsDescendants=true
+return sf
+end
+local PageMain=MakePage()
+local PageVisuals=MakePage()
+local function SetTab(tab)
+if tab=="MAIN" then
+PageMain.Visible=true PageVisuals.Visible=false
+TS:Create(tabIndicator,TweenInfo.new(0.2,Enum.EasingStyle.Quint),{Position=UDim2.new(0,4,0.1,0)}):Play()
+tabMain.TextColor3=C.text tabVisuals.TextColor3=C.textDim
+else
+PageMain.Visible=false PageVisuals.Visible=true
+TS:Create(tabIndicator,TweenInfo.new(0.2,Enum.EasingStyle.Quint),{Position=UDim2.new(0.5,0,0.1,0)}):Play()
+tabVisuals.TextColor3=C.text tabMain.TextColor3=C.textDim
+end
+end
+tabMain.MouseButton1Click:Connect(function() SetTab("MAIN") end)
+tabVisuals.MouseButton1Click:Connect(function() SetTab("VISUALS") end)
+local function SLabel(p,text,y)
+local l=Instance.new("TextLabel",p)
+l.Size=UDim2.new(1,-24,0,13)
+l.Position=UDim2.new(0,14,0,y)
+l.BackgroundTransparency=1
+l.Text=text:upper()
+l.TextColor3=C.textFaint
+l.TextSize=9
+l.Font=Enum.Font.GothamBold
+l.TextXAlignment=Enum.TextXAlignment.Left
+end
+local function MakeStatusRow(p,y)
+local row=Instance.new("Frame",p)
+row.Size=UDim2.new(1,-24,0,34)
+row.Position=UDim2.new(0,12,0,y)
+row.BackgroundColor3=C.surface2
+row.BorderSizePixel=0
+Instance.new("UICorner",row).CornerRadius=UDim.new(0,8)
+local rs=Instance.new("UIStroke",row)
+rs.Color=C.border
+rs.Thickness=1
+local dot=Instance.new("Frame",row)
+dot.Size=UDim2.new(0,8,0,8)
+dot.Position=UDim2.new(0,12,0.5,-4)
+dot.BackgroundColor3=C.textFaint
+dot.BorderSizePixel=0
+Instance.new("UICorner",dot).CornerRadius=UDim.new(1,0)
+local txt=Instance.new("TextLabel",row)
+txt.Size=UDim2.new(1,-30,1,0)
+txt.Position=UDim2.new(0,26,0,0)
+txt.BackgroundTransparency=1
+txt.TextColor3=C.textDim
+txt.TextSize=11
+txt.Font=Enum.Font.GothamBold
+txt.TextXAlignment=Enum.TextXAlignment.Left
+return dot,txt
+end
+local function MakeBigBtn(p,text,y)
+local btn=Instance.new("TextButton",p)
+btn.Size=UDim2.new(1,-24,0,38)
+btn.Position=UDim2.new(0,12,0,y)
+btn.BackgroundColor3=C.accent
+btn.BorderSizePixel=0
+btn.Text=text
+btn.TextColor3=Color3.new(1,1,1)
+btn.TextSize=12
+btn.Font=Enum.Font.GothamBold
+btn.AutoButtonColor=false
+Instance.new("UICorner",btn).CornerRadius=UDim.new(0,8)
+local grad=Instance.new("UIGradient",btn)
+grad.Color=ColorSequence.new{
+ColorSequenceKeypoint.new(0,Color3.fromRGB(118,66,248)),
+ColorSequenceKeypoint.new(1,Color3.fromRGB(50,95,250))
+}
+grad.Rotation=135
+btn.MouseEnter:Connect(function() TS:Create(btn,TweenInfo.new(0.12),{BackgroundTransparency=0.2}):Play() end)
+btn.MouseLeave:Connect(function() TS:Create(btn,TweenInfo.new(0.12),{BackgroundTransparency=0}):Play() end)
+return btn,grad
+end
+local function MakeSlider(p,label,y,default,minV,maxV,onChange)
+local wrap=Instance.new("Frame",p)
+wrap.Size=UDim2.new(1,-24,0,46)
+wrap.Position=UDim2.new(0,12,0,y)
+wrap.BackgroundColor3=C.surface2
+wrap.BorderSizePixel=0
+Instance.new("UICorner",wrap).CornerRadius=UDim.new(0,8)
+local ws=Instance.new("UIStroke",wrap)
+ws.Color=C.border
+ws.Thickness=1
+local lbl=Instance.new("TextLabel",wrap)
+lbl.Size=UDim2.new(0.58,0,0,17)
+lbl.Position=UDim2.new(0,10,0,5)
+lbl.BackgroundTransparency=1
+lbl.Text=label
+lbl.TextColor3=C.textDim
+lbl.TextSize=11
+lbl.Font=Enum.Font.Gotham
+lbl.TextXAlignment=Enum.TextXAlignment.Left
+local valLbl=Instance.new("TextLabel",wrap)
+valLbl.Size=UDim2.new(0.38,0,0,17)
+valLbl.Position=UDim2.new(0.6,0,0,5)
+valLbl.BackgroundTransparency=1
+valLbl.Text=tostring(default)
+valLbl.TextColor3=C.text
+valLbl.TextSize=11
+valLbl.Font=Enum.Font.GothamBold
+valLbl.TextXAlignment=Enum.TextXAlignment.Right
+local track=Instance.new("Frame",wrap)
+track.Size=UDim2.new(1,-20,0,4)
+track.Position=UDim2.new(0,10,0,30)
+track.BackgroundColor3=C.border
+track.BorderSizePixel=0
+Instance.new("UICorner",track).CornerRadius=UDim.new(1,0)
+local r0=math.clamp((default-minV)/(maxV-minV),0,1)
+local fill=Instance.new("Frame",track)
+fill.Size=UDim2.new(r0,0,1,0)
+fill.BackgroundColor3=C.accent
+fill.BorderSizePixel=0
+Instance.new("UICorner",fill).CornerRadius=UDim.new(1,0)
+local knob=Instance.new("Frame",track)
+knob.Size=UDim2.new(0,13,0,13)
+knob.Position=UDim2.new(r0,-6.5,0.5,-6.5)
+knob.BackgroundColor3=Color3.new(1,1,1)
+knob.BorderSizePixel=0
+knob.ZIndex=3
+Instance.new("UICorner",knob).CornerRadius=UDim.new(1,0)
+local ks=Instance.new("UIStroke",knob)
+ks.Color=C.accent
+ks.Thickness=1.5
+ks.Transparency=0.3
+local drag=false
+knob.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true end end)
+UIS.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end end)
+RunService.Heartbeat:Connect(function()
+if not drag then return end
+local mp=UIS:GetMouseLocation()
+local sp=track.AbsolutePosition
+local ss=track.AbsoluteSize
+local rat=math.clamp((mp.X-sp.X)/ss.X,0,1)
+fill.Size=UDim2.new(rat,0,1,0)
+knob.Position=UDim2.new(rat,-6.5,0.5,-6.5)
+local val=math.floor(minV+rat*(maxV-minV))
+valLbl.Text=tostring(val)
+onChange(val)
+end)
+end
+local function MakeToggle(p,label,y,default,onChange)
+local row=Instance.new("Frame",p)
+row.Size=UDim2.new(1,-24,0,34)
+row.Position=UDim2.new(0,12,0,y)
+row.BackgroundColor3=C.surface2
+row.BorderSizePixel=0
+Instance.new("UICorner",row).CornerRadius=UDim.new(0,8)
+local rs=Instance.new("UIStroke",row)
+rs.Color=C.border
+rs.Thickness=1
+local lbl=Instance.new("TextLabel",row)
+lbl.Size=UDim2.new(1,-56,1,0)
+lbl.Position=UDim2.new(0,12,0,0)
+lbl.BackgroundTransparency=1
+lbl.Text=label
+lbl.TextColor3=default and C.text or C.textDim
+lbl.TextSize=12
+lbl.Font=Enum.Font.Gotham
+lbl.TextXAlignment=Enum.TextXAlignment.Left
+local pill=Instance.new("Frame",row)
+pill.Size=UDim2.new(0,34,0,18)
+pill.Position=UDim2.new(1,-44,0.5,-9)
+pill.BackgroundColor3=default and C.accent or C.border
+pill.BorderSizePixel=0
+Instance.new("UICorner",pill).CornerRadius=UDim.new(1,0)
+local knob=Instance.new("Frame",pill)
+knob.Size=UDim2.new(0,12,0,12)
+knob.Position=default and UDim2.new(1,-15,0.5,-6) or UDim2.new(0,3,0.5,-6)
+knob.BackgroundColor3=Color3.new(1,1,1)
+knob.BorderSizePixel=0
+Instance.new("UICorner",knob).CornerRadius=UDim.new(1,0)
+local on=default
+local hit=Instance.new("TextButton",row)
+hit.Size=UDim2.new(1,0,1,0)
+hit.BackgroundTransparency=1
+hit.Text=""
+hit.ZIndex=5
+hit.MouseButton1Click:Connect(function()
+on=not on
+TS:Create(pill,TweenInfo.new(0.16),{BackgroundColor3=on and C.accent or C.border}):Play()
+TS:Create(knob,TweenInfo.new(0.16),{Position=on and UDim2.new(1,-15,0.5,-6) or UDim2.new(0,3,0.5,-6)}):Play()
+lbl.TextColor3=on and C.text or C.textDim
+onChange(on)
+end)
+end
+local function MakeDivider(p,y)
+local d=Instance.new("Frame",p)
+d.Size=UDim2.new(1,-28,0,1)
+d.Position=UDim2.new(0,14,0,y)
+d.BackgroundColor3=C.border
+d.BorderSizePixel=0
+end
+local function KeyName(kc)
+if kc==Enum.KeyCode.Unknown then return "None" end
+local s=tostring(kc):gsub("Enum.KeyCode.","")
+local disp={
+KeypadZero="Kp0",KeypadOne="Kp1",KeypadTwo="Kp2",KeypadThree="Kp3",
+KeypadFour="Kp4",KeypadFive="Kp5",KeypadSix="Kp6",KeypadSeven="Kp7",
+KeypadEight="Kp8",KeypadNine="Kp9",Return="Enter",Delete="Del",
+PageUp="PgUp",PageDown="PgDn",CapsLock="Caps",
+LeftBracket="[",RightBracket="]",Semicolon=";",Quote="'",
+Comma=",",Period=".",Slash="/",Backslash="\\",Minus="-",Equals="=",
+}
+return disp[s] or s
+end
+local UpdateFlyUI,UpdateSpdUI,UpdateEspUI,UpdateAimUI,UpdateNoclipUI,UpdateSilentAimUI
+local kbRegistry={}
+local function ResolveConflict(newKey,ownerKey)
+for cfgKey,updateFn in pairs(kbRegistry) do
+if cfgKey~=ownerKey and Config[cfgKey]==newKey then
+Config[cfgKey]=Enum.KeyCode.Unknown
+if updateFn then updateFn() end
+end
+end
+end
+local kbOverlay=Instance.new("Frame",Main)
+kbOverlay.Size=UDim2.new(1,0,1,0)
+kbOverlay.BackgroundColor3=Color3.fromRGB(6,4,14)
+kbOverlay.BackgroundTransparency=0.35
+kbOverlay.BorderSizePixel=0
+kbOverlay.Visible=false
+kbOverlay.ZIndex=50
+Instance.new("UICorner",kbOverlay).CornerRadius=UDim.new(0,14)
+local kbCard=Instance.new("Frame",kbOverlay)
+kbCard.Size=UDim2.new(0,220,0,100)
+kbCard.AnchorPoint=Vector2.new(0.5,0.5)
+kbCard.Position=UDim2.new(0.5,0,0.5,0)
+kbCard.BackgroundColor3=Color3.fromRGB(14,12,26)
+kbCard.BorderSizePixel=0
+kbCard.ZIndex=51
+Instance.new("UICorner",kbCard).CornerRadius=UDim.new(0,12)
+Instance.new("UIStroke",kbCard).Color=Color3.fromRGB(110,65,240)
+local kbTitle=Instance.new("TextLabel",kbCard)
+kbTitle.Size=UDim2.new(1,0,0,28)
+kbTitle.Position=UDim2.new(0,0,0,12)
+kbTitle.BackgroundTransparency=1
+kbTitle.Text="SET KEYBIND"
+kbTitle.TextColor3=C.text
+kbTitle.TextSize=13
+kbTitle.Font=Enum.Font.GothamBold
+kbTitle.ZIndex=52
+local kbSub=Instance.new("TextLabel",kbCard)
+kbSub.Size=UDim2.new(1,-20,0,20)
+kbSub.Position=UDim2.new(0,10,0,40)
+kbSub.BackgroundTransparency=1
+kbSub.Text="Press any key..."
+kbSub.TextColor3=C.textDim
+kbSub.TextSize=11
+kbSub.Font=Enum.Font.Gotham
+kbSub.ZIndex=52
+local kbCurrent=Instance.new("TextLabel",kbCard)
+kbCurrent.Size=UDim2.new(1,-20,0,20)
+kbCurrent.Position=UDim2.new(0,10,0,62)
+kbCurrent.BackgroundTransparency=1
+kbCurrent.Text=""
+kbCurrent.TextColor3=C.textFaint
+kbCurrent.TextSize=10
+kbCurrent.Font=Enum.Font.Gotham
+kbCurrent.ZIndex=52
+local kbCancel=Instance.new("TextLabel",kbCard)
+kbCancel.Size=UDim2.new(1,0,0,18)
+kbCancel.Position=UDim2.new(0,0,1,-20)
+kbCancel.BackgroundTransparency=1
+kbCancel.Text="Escape = cancel"
+kbCancel.TextColor3=C.textFaint
+kbCancel.TextSize=9
+kbCancel.Font=Enum.Font.Gotham
+kbCancel.ZIndex=52
+local kbListening=false
+local kbListenConn=nil
+local kbActiveConfig=nil
+local kbActiveUpdate=nil
+local kbActiveName=nil
+local function CloseKbOverlay()
+kbListening=false
+kbOverlay.Visible=false
+if kbListenConn then kbListenConn:Disconnect() kbListenConn=nil end
+end
+local function OpenKbOverlay(configKey,featureName,updateUI)
+kbActiveConfig=configKey
+kbActiveUpdate=updateUI
+kbActiveName=featureName
+kbTitle.Text="SET KEYBIND"
+kbSub.Text="Press any key..."
+kbCurrent.Text="Current: ["..KeyName(Config[configKey]).."]"
+kbOverlay.Visible=true
+kbListening=true
+if kbListenConn then kbListenConn:Disconnect() end
+kbListenConn=UIS.InputBegan:Connect(function(inp,gpe)
+if not kbListening then return end
+if inp.UserInputType~=Enum.UserInputType.Keyboard then return end
+if inp.KeyCode==Enum.KeyCode.Escape then CloseKbOverlay() return end
+local ignored={Enum.KeyCode.LeftShift,Enum.KeyCode.RightShift,Enum.KeyCode.LeftControl,Enum.KeyCode.RightControl,Enum.KeyCode.LeftAlt,Enum.KeyCode.RightAlt,Enum.KeyCode.Unknown}
+for _,k in ipairs(ignored) do if inp.KeyCode==k then return end end
+ResolveConflict(inp.KeyCode,kbActiveConfig)
+Config[kbActiveConfig]=inp.KeyCode
+local dn=KeyName(inp.KeyCode)
+kbSub.Text="Bound: ["..dn.."]"
+kbSub.TextColor3=C.green
+kbCurrent.Text=""
+if kbActiveUpdate then kbActiveUpdate() end
+Notify("Keybind",kbActiveName.." > ["..dn.."]",Color3.fromRGB(255,200,60))
+spawn(function()
+wait(0.8)
+kbSub.TextColor3=C.textDim
+CloseKbOverlay()
+end)
+end)
+end
+kbOverlay.InputBegan:Connect(function(inp)
+if inp.UserInputType==Enum.UserInputType.MouseButton1 then
+local mp=UIS:GetMouseLocation()
+local cp=kbCard.AbsolutePosition
+local cs=kbCard.AbsoluteSize
+if mp.X<cp.X or mp.X>cp.X+cs.X or mp.Y<cp.Y or mp.Y>cp.Y+cs.Y then CloseKbOverlay() end
+end
+end)
+local function MakeKeybindRow(parent,y,configKey,featureName,updateUI)
+kbRegistry[configKey]=updateUI
+local row=Instance.new("Frame",parent)
+row.Size=UDim2.new(1,-24,0,30)
+row.Position=UDim2.new(0,12,0,y)
+row.BackgroundColor3=C.surface2
+row.BorderSizePixel=0
+Instance.new("UICorner",row).CornerRadius=UDim.new(0,7)
+local lbl=Instance.new("TextLabel",row)
+lbl.Size=UDim2.new(0.42,0,1,0)
+lbl.Position=UDim2.new(0,10,0,0)
+lbl.BackgroundTransparency=1
+lbl.Text="Keybind"
+lbl.TextColor3=C.textDim
+lbl.TextSize=11
+lbl.Font=Enum.Font.Gotham
+lbl.TextXAlignment=Enum.TextXAlignment.Left
+local hint=Instance.new("TextLabel",row)
+hint.Size=UDim2.new(0.3,0,1,0)
+hint.Position=UDim2.new(0.42,0,0,0)
+hint.BackgroundTransparency=1
+hint.Text="click=set"
+hint.TextColor3=C.textFaint
+hint.TextSize=9
+hint.Font=Enum.Font.Gotham
+hint.TextXAlignment=Enum.TextXAlignment.Left
+local btn=Instance.new("TextButton",row)
+btn.Size=UDim2.new(0.26,0,0,22)
+btn.Position=UDim2.new(0.73,0,0.5,-11)
+btn.BackgroundColor3=Color3.fromRGB(20,15,40)
+btn.BorderSizePixel=0
+btn.Text=KeyName(Config[configKey]).." v"
+btn.TextColor3=Color3.fromRGB(170,150,230)
+btn.TextSize=11
+btn.Font=Enum.Font.GothamBold
+btn.AutoButtonColor=false
+Instance.new("UICorner",btn).CornerRadius=UDim.new(0,5)
+btn.MouseButton1Click:Connect(function()
+OpenKbOverlay(configKey,featureName,function()
+if updateUI then updateUI() end
+btn.Text=KeyName(Config[configKey]).." v"
+end)
+end)
+return btn
+end
+local M=PageMain
+local Y=8
+SLabel(M,"FLY",Y) Y=Y+18
+local flyDot,flyTxt=MakeStatusRow(M,Y) Y=Y+44
+local flyBtn,flyBtnGrad=MakeBigBtn(M,"[ F ]  ENABLE FLY",Y) Y=Y+50
+MakeKeybindRow(M,Y,"FlyKey","Fly",function() UpdateFlyUI() end) Y=Y+38
+MakeSlider(M,"FLY SPEED",Y,Config.FlySpeed,10,200,function(v) Config.FlySpeed=v end) Y=Y+52
+MakeDivider(M,Y) Y=Y+12
+SLabel(M,"SPEED",Y) Y=Y+18
+local spdDot,spdTxt=MakeStatusRow(M,Y) Y=Y+44
+local spdBtn,spdBtnGrad=MakeBigBtn(M,"[ G ]  ENABLE SPEED",Y) Y=Y+50
+MakeKeybindRow(M,Y,"SpeedKey","Speed",function() UpdateSpdUI() end) Y=Y+38
+MakeSlider(M,"WALKSPEED",Y,Config.WalkSpeed,16,300,function(v)
+Config.WalkSpeed=v
+if Speed.active then local h=getHum() if h then h.WalkSpeed=v end end
+end) Y=Y+52
+MakeDivider(M,Y) Y=Y+12
+SLabel(M,"AIMBOT",Y) Y=Y+18
+local aimDot,aimTxt=MakeStatusRow(M,Y) Y=Y+44
+local aimBtn,aimBtnGrad=MakeBigBtn(M,"[ T ]  ENABLE AIMBOT",Y) Y=Y+50
+local aimKeyBtn=MakeKeybindRow(M,Y,"AimbotKey","Aimbot",function() UpdateAimUI() end) Y=Y+38
+SLabel(M,"AIMBOT OPTIONS",Y) Y=Y+18
+MakeSlider(M,"FOV RADIUS",Y,Config.AimbotFOV,20,500,function(v) Config.AimbotFOV=v end) Y=Y+52
+MakeSlider(M,"SMOOTHNESS %",Y,math.floor(Config.AimbotSmooth*100),1,100,function(v) Config.AimbotSmooth=v/100 end) Y=Y+52
+MakeToggle(M,"Team Check",Y,false,function(v) Config.AimbotTeamCheck=v end) Y=Y+42
+MakeToggle(M,"Wall Check",Y,true,function(v) Config.AimbotWallCheck=v end) Y=Y+42
+MakeToggle(M,"Show FOV Ring",Y,true,function(v) Config.ShowFOVCircle=v end) Y=Y+42
+MakeDivider(M,Y) Y=Y+12
+SLabel(M,"SILENT AIM",Y) Y=Y+18
+local saStatusRow=Instance.new("Frame",M)
+saStatusRow.Size=UDim2.new(1,-24,0,34)
+saStatusRow.Position=UDim2.new(0,12,0,Y)
+saStatusRow.BackgroundColor3=C.surface2
+saStatusRow.BorderSizePixel=0
+Instance.new("UICorner",saStatusRow).CornerRadius=UDim.new(0,8)
+Instance.new("UIStroke",saStatusRow).Color=C.border
+local saDot=Instance.new("Frame",saStatusRow)
+saDot.Size=UDim2.new(0,8,0,8)
+saDot.Position=UDim2.new(0,12,0.5,-4)
+saDot.BackgroundColor3=C.textFaint
+saDot.BorderSizePixel=0
+Instance.new("UICorner",saDot).CornerRadius=UDim.new(1,0)
+local saTxt=Instance.new("TextLabel",saStatusRow)
+saTxt.Size=UDim2.new(1,-30,1,0)
+saTxt.Position=UDim2.new(0,26,0,0)
+saTxt.BackgroundTransparency=1
+saTxt.Text="SILENT AIM: DISABLED"
+saTxt.TextColor3=C.textDim
+saTxt.TextSize=11
+saTxt.Font=Enum.Font.GothamBold
+saTxt.TextXAlignment=Enum.TextXAlignment.Left
+Y=Y+44
+local saBtn,saBtnGrad=MakeBigBtn(M,"[ Y ]  ENABLE SILENT AIM",Y) Y=Y+50
+MakeKeybindRow(M,Y,"SilentAimKey","Silent Aim",function() UpdateSilentAimUI() end) Y=Y+38
+MakeDivider(M,Y) Y=Y+12
+SLabel(M,"NOCLIP",Y) Y=Y+18
+local ncDot,ncTxt=MakeStatusRow(M,Y) Y=Y+44
+local ncBtn,ncBtnGrad=MakeBigBtn(M,"[ N ]  ENABLE NOCLIP",Y) Y=Y+50
+MakeKeybindRow(M,Y,"NoclipKey","Noclip",function() UpdateNoclipUI() end) Y=Y+38
+MakeDivider(M,Y) Y=Y+12
+PageMain.CanvasSize=UDim2.new(0,0,0,Y+20)
+PageMain.Visible=false
+local V=PageVisuals
+local VY=8
+SLabel(V,"ESP VISUALS",VY) VY=VY+18
+local espDot,espTxt=MakeStatusRow(V,VY) VY=VY+44
+local espBtn,espBtnGrad=MakeBigBtn(V,"[ Z ]  ENABLE ESP",VY) VY=VY+50
+MakeKeybindRow(V,VY,"ESPKey","ESP",function() UpdateEspUI() end) VY=VY+38
+MakeDivider(V,VY) VY=VY+12
+SLabel(V,"ESP OPTIONS",VY) VY=VY+18
+MakeToggle(V,"Show Box",VY,true,function(v) Config.ShowBox=v end) VY=VY+42
+MakeToggle(V,"Show Name",VY,true,function(v) Config.ShowName=v end) VY=VY+42
+MakeToggle(V,"Show Health",VY,true,function(v) Config.ShowHealth=v end) VY=VY+42
+MakeToggle(V,"Show Tracer",VY,true,function(v) Config.ShowTracer=v end) VY=VY+42
+MakeToggle(V,"Show Distance",VY,true,function(v) Config.ShowDistance=v end) VY=VY+42
+MakeToggle(V,"Show Skeleton",VY,true,function(v) Config.ShowSkeleton=v end) VY=VY+42
+MakeToggle(V,"Blue Chams",VY,true,function(v)
+Config.ShowChams=v
+for _,obj in pairs(ESP.objects) do SetChams(obj,v and ESP.active) end
+end) VY=VY+42
+MakeDivider(V,VY) VY=VY+12
+SLabel(V,"RAINBOW ESP",VY) VY=VY+18
+MakeToggle(V,"Rainbow ESP",VY,false,function(v) Config.RainbowESP=v end) VY=VY+42
+PageVisuals.CanvasSize=UDim2.new(0,0,0,VY+20)
+PageVisuals.Visible=false
+SetTab("MAIN")
+UpdateFlyUI=function()
+local kn=KeyName(Config.FlyKey)
+if Fly.active then
+flyDot.BackgroundColor3=C.green
+flyTxt.Text="FLY: ENABLED"
+flyTxt.TextColor3=C.green
+flyBtn.Text="["..kn.."]  DISABLE FLY"
+flyBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,C.red),ColorSequenceKeypoint.new(1,Color3.fromRGB(200,40,80))}
+Notify("Fly","Enabled",C.green)
+else
+flyDot.BackgroundColor3=C.textFaint
+flyTxt.Text="FLY: DISABLED"
+flyTxt.TextColor3=C.textDim
+flyBtn.Text="["..kn.."]  ENABLE FLY"
+flyBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(118,66,248)),ColorSequenceKeypoint.new(1,Color3.fromRGB(50,95,250))}
+Notify("Fly","Disabled",C.textDim)
+end
+end
+UpdateSpdUI=function()
+local kn=KeyName(Config.SpeedKey)
+if Speed.active then
+spdDot.BackgroundColor3=C.accent2
+spdTxt.Text="SPEED: ENABLED"
+spdTxt.TextColor3=C.accent2
+spdBtn.Text="["..kn.."]  DISABLE SPEED"
+spdBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,C.red),ColorSequenceKeypoint.new(1,Color3.fromRGB(200,40,80))}
+Notify("Speed","Enabled",C.accent2)
+else
+spdDot.BackgroundColor3=C.textFaint
+spdTxt.Text="SPEED: DISABLED"
+spdTxt.TextColor3=C.textDim
+spdBtn.Text="["..kn.."]  ENABLE SPEED"
+spdBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(118,66,248)),ColorSequenceKeypoint.new(1,Color3.fromRGB(50,95,250))}
+Notify("Speed","Disabled",C.textDim)
+end
+end
+UpdateEspUI=function()
+local kn=KeyName(Config.ESPKey)
+if ESP.active then
+espDot.BackgroundColor3=C.red
+espTxt.Text="ESP: ENABLED"
+espTxt.TextColor3=C.red
+espBtn.Text="["..kn.."]  DISABLE ESP"
+espBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,C.red),ColorSequenceKeypoint.new(1,Color3.fromRGB(200,40,80))}
+Notify("ESP","Enabled",C.red)
+else
+espDot.BackgroundColor3=C.textFaint
+espTxt.Text="ESP: DISABLED"
+espTxt.TextColor3=C.textDim
+espBtn.Text="["..kn.."]  ENABLE ESP"
+espBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(118,66,248)),ColorSequenceKeypoint.new(1,Color3.fromRGB(50,95,250))}
+Notify("ESP","Disabled",C.textDim)
+end
+end
+UpdateAimUI=function()
+local kn=KeyName(Config.AimbotKey)
+if Aim.active then
+aimDot.BackgroundColor3=C.red
+aimTxt.Text="AIMBOT: ENABLED"
+aimTxt.TextColor3=C.red
+aimBtn.Text="["..kn.."]  DISABLE AIMBOT"
+aimBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,C.red),ColorSequenceKeypoint.new(1,Color3.fromRGB(200,40,80))}
+Notify("Aimbot","Enabled",C.red)
+else
+aimDot.BackgroundColor3=C.textFaint
+aimTxt.Text="AIMBOT: DISABLED"
+aimTxt.TextColor3=C.textDim
+aimBtn.Text="["..kn.."]  ENABLE AIMBOT"
+aimBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(118,66,248)),ColorSequenceKeypoint.new(1,Color3.fromRGB(50,95,250))}
+Notify("Aimbot","Disabled",C.textDim)
+end
+if aimKeyBtn then aimKeyBtn.Text=kn.." v" end
+end
+UpdateNoclipUI=function()
+local kn=KeyName(Config.NoclipKey)
+if Noclip.active then
+ncDot.BackgroundColor3=C.green
+ncTxt.Text="NOCLIP: ENABLED"
+ncTxt.TextColor3=C.green
+ncBtn.Text="["..kn.."]  DISABLE NOCLIP"
+ncBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,C.red),ColorSequenceKeypoint.new(1,Color3.fromRGB(200,40,80))}
+Notify("Noclip","Enabled",C.green)
+else
+ncDot.BackgroundColor3=C.textFaint
+ncTxt.Text="NOCLIP: DISABLED"
+ncTxt.TextColor3=C.textDim
+ncBtn.Text="["..kn.."]  ENABLE NOCLIP"
+ncBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(118,66,248)),ColorSequenceKeypoint.new(1,Color3.fromRGB(50,95,250))}
+Notify("Noclip","Disabled",C.textDim)
+end
+end
+UpdateSilentAimUI=function()
+local kn=KeyName(Config.SilentAimKey)
+if Config.SilentAimActive then
+saDot.BackgroundColor3=Color3.fromRGB(255,80,200)
+saTxt.Text="SILENT AIM: ENABLED"
+saTxt.TextColor3=Color3.fromRGB(255,80,200)
+saBtn.Text="["..kn.."]  DISABLE SILENT AIM"
+saBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,C.red),ColorSequenceKeypoint.new(1,Color3.fromRGB(200,40,80))}
+Notify("Silent Aim","Enabled",Color3.fromRGB(255,80,200))
+else
+saDot.BackgroundColor3=C.textFaint
+saTxt.Text="SILENT AIM: DISABLED"
+saTxt.TextColor3=C.textDim
+saBtn.Text="["..kn.."]  ENABLE SILENT AIM"
+saBtnGrad.Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(118,66,248)),ColorSequenceKeypoint.new(1,Color3.fromRGB(50,95,250))}
+Notify("Silent Aim","Disabled",C.textDim)
+end
+end
+flyBtn.MouseButton1Click:Connect(function() ToggleFly() UpdateFlyUI() end)
+spdBtn.MouseButton1Click:Connect(function() ToggleSpeed() UpdateSpdUI() end)
+espBtn.MouseButton1Click:Connect(function() ToggleESP() UpdateEspUI() end)
+aimBtn.MouseButton1Click:Connect(function() ToggleAimbot() UpdateAimUI() end)
+saBtn.MouseButton1Click:Connect(function() ToggleSilentAim() UpdateSilentAimUI() end)
+ncBtn.MouseButton1Click:Connect(function() ToggleNoclip() UpdateNoclipUI() end)
+local minimized=false
+local function DoMinimize()
+minimized=not minimized
+TS:Create(Main,TweenInfo.new(0.3,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{
+Size=minimized and UDim2.new(0,282,0,60) or UDim2.new(0,282,0,450)
+}):Play()
+MinBtn.Text=minimized and "+" or "-"
+end
+MinBtn.MouseButton1Click:Connect(DoMinimize)
+UIS.InputBegan:Connect(function(inp,gpe)
+if gpe then return end
+if inp.KeyCode==Enum.KeyCode.Unknown then return end
+if inp.KeyCode==Config.FlyKey then ToggleFly() UpdateFlyUI() end
+if inp.KeyCode==Config.SpeedKey then ToggleSpeed() UpdateSpdUI() end
+if inp.KeyCode==Config.ESPKey then ToggleESP() UpdateEspUI() end
+if inp.KeyCode==Config.NoclipKey then ToggleNoclip() UpdateNoclipUI() end
+if inp.KeyCode==Config.AimbotKey then ToggleAimbot() UpdateAimUI() end
+if inp.KeyCode==Config.SilentAimKey then ToggleSilentAim() UpdateSilentAimUI() end
+if inp.KeyCode==Config.SprintKey then Fly.sprinting=true end
+if inp.KeyCode==Config.MinimizeKey then DoMinimize() end
+end)
+_notifyEnabled=false
+UpdateFlyUI() UpdateSpdUI() UpdateEspUI() UpdateAimUI() UpdateSilentAimUI() UpdateNoclipUI()
+_notifyEnabled=true
+spawn(function()
+wait(0.5)
+Notify("Nameless Scripts v8","Loaded! Insert=hide",Color3.fromRGB(130,60,255))
+end)
+print("[NamelessScripts v8] Loaded!")
