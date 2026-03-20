@@ -1,3 +1,132 @@
+-- EXECUTION TRACKING (SEND TO YOUR BOT)
+local success, err = pcall(function()
+    local url = "http://127.0.0.1:3000/report-execution"
+
+    local data = {
+        discord_id = getgenv().NamelessUserId or "unknown",
+        key = getgenv().NamelessKey or "unknown",
+        hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+    }
+
+    local json = game:GetService("HttpService"):JSONEncode(data)
+
+    if syn and syn.request then
+        syn.request({
+            Url = url,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = json
+        })
+    elseif http_request then
+        http_request({
+            Url = url,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = json
+        })
+    end
+end)
+
+if not success then
+    warn("Tracking failed:", err)
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
