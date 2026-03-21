@@ -1,6 +1,69 @@
-getgenv().NamelessKey = "BF5EBB-88F457-7CF192-8BA5A7"
-loadstring(game:HttpGet("https://raw.githubusercontent.com/kyronshaw912-collab/script-lua/main/PhantomScript.txt"))()
-           
+task.spawn(function()
+    local HttpService = game:GetService("HttpService")
+
+    local executorName = "Unknown Executor"
+    if identifyexecutor then
+        local okExec, execResult = pcall(identifyexecutor)
+        if okExec and execResult then
+            executorName = tostring(execResult)
+        end
+    end
+
+    print("TRACKING: executor =", executorName)
+
+    local req = (syn and syn.request) or http_request or request
+    print("TRACKING: request function =", tostring(req))
+
+    if not req then
+        warn("TRACKING: No HTTP request function found")
+        return
+    end
+
+    local body = HttpService:JSONEncode({
+        auth = "changeme123",
+        key = getgenv().NamelessKey or "unknown",
+        executor = executorName
+    })
+
+    local ok, result = pcall(function()
+        return req({
+            Url = "http://86.11.23.18:3000/debug-execution",
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = body
+        })
+    end)
+
+    print("TRACKING: request ok =", ok)
+    print("TRACKING: request result =", tostring(result))
+
+    if not ok then
+        warn("TRACKING FAILED:", result)
+    end
+end)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
