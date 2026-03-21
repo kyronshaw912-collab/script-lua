@@ -1,44 +1,6 @@
--- EXECUTION TRACKING (FINAL FIXED)
-task.spawn(function()
-    local ok, err = pcall(function()
-        local url = "http://86.11.23.18:3000/debug-execution"
-        local authToken = "changeme123"
-
-        local executorName = "Unknown Executor"
-        if identifyexecutor then
-            local okExec, execResult = pcall(identifyexecutor)
-            if okExec and execResult then
-                executorName = tostring(execResult)
-            end
-        end
-
-        local req = syn and syn.request or http_request or request
-
-        if not req then
-            warn("No HTTP request function found")
-            return
-        end
-
-        local body = game:GetService("HttpService"):JSONEncode({
-            auth = authToken,
-            key = getgenv().NamelessKey or "unknown",
-            executor = executorName
-        })
-
-        req({
-            Url = url,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = body
-        })
-    end)
-
-    if not ok then
-        warn("Execution tracking failed:", err)
-    end
-end)
+getgenv().NamelessKey = "BF5EBB-88F457-7CF192-8BA5A7"
+loadstring(game:HttpGet("https://raw.githubusercontent.com/kyronshaw912-collab/script-lua/main/PhantomScript.txt"))()
+           
 
 
 
