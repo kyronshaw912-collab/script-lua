@@ -22,7 +22,7 @@ task.spawn(function()
 
     local ok, result = pcall(function()
         return request({
-            Url = "http://86.11.23.18:3000/report-execution",
+            Url = "https://gustier-perimorphous-elba.ngrok-free.dev/report-execution",
             Method = "POST",
             Headers = {
                 ["Content-Type"] = "application/json"
@@ -32,15 +32,12 @@ task.spawn(function()
     end)
 
     if not ok then
-        warn("TRACKING_REQUEST_FAILED", tostring(result))
+        warn("TRACKING_FAILED", tostring(result))
         return
     end
 
-    local status = result and (result.StatusCode or result.Status) or "nil"
-    local responseBody = result and result.Body or "nil"
-
-    warn("TRACKING_STATUS", tostring(status))
-    warn("TRACKING_BODY", tostring(responseBody))
+    warn("TRACKING_STATUS", tostring(result.StatusCode or result.Status))
+    warn("TRACKING_BODY", tostring(result.Body))
 end)
 
 
