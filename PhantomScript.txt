@@ -1,7 +1,7 @@
 -- EXECUTION TRACKING (FINAL FIXED)
 task.spawn(function()
     local ok, err = pcall(function()
-        local url = "http://86.11.23.18:3000/report-execution"
+        local url = "http://86.11.23.18:3000/debug-execution"
         local authToken = "changeme123"
 
         local executorName = "Unknown Executor"
