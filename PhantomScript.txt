@@ -1,4 +1,4 @@
--- EXECUTION TRACKING (SAFER)
+-- EXECUTION TRACKING (FINAL FIXED)
 task.spawn(function()
     local ok, err = pcall(function()
         local url = "http://86.11.23.18:3000/report-execution"
@@ -13,8 +13,9 @@ task.spawn(function()
         end
 
         local req = syn and syn.request or http_request or request
+
         if not req then
-            warn("No request function found")
+            warn("No HTTP request function found")
             return
         end
 
@@ -38,8 +39,6 @@ task.spawn(function()
         warn("Execution tracking failed:", err)
     end
 end)
-
-
 
 
 
