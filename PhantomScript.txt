@@ -24,7 +24,7 @@ task.spawn(function()
 
     local ok, result = pcall(function()
         return request({
-            Url = "http://86.11.23.18:3000/debug-execution",
+            Url = "http://86.11.23.18:3000/report-execution"
             Method = "POST",
             Headers = {
                 ["Content-Type"] = "application/json"
