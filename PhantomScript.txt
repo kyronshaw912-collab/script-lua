@@ -1,36 +1,43 @@
--- EXECUTION TRACKING (SEND TO YOUR BOT)
-local success, err = pcall(function()
-    local url = "http://86.11.23.18:3000/report-execution"
+-- EXECUTION TRACKING (SAFER)
+task.spawn(function()
+    local ok, err = pcall(function()
+        local url = "http://86.11.23.18:3000/report-execution"
+        local authToken = "changeme123"
 
-    local data = {
-        discord_id = getgenv().NamelessUserId or "unknown",
-        key = getgenv().NamelessKey or "unknown",
-        hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-    }
+        local executorName = "Unknown Executor"
+        if identifyexecutor then
+            local okExec, execResult = pcall(identifyexecutor)
+            if okExec and execResult then
+                executorName = tostring(execResult)
+            end
+        end
 
-    local json = game:GetService("HttpService"):JSONEncode(data)
+        local req = syn and syn.request or http_request or request
+        if not req then
+            warn("No request function found")
+            return
+        end
 
-    if syn and syn.request then
-        syn.request({
+        local body = game:GetService("HttpService"):JSONEncode({
+            auth = authToken,
+            key = getgenv().NamelessKey or "unknown",
+            executor = executorName
+        })
+
+        req({
             Url = url,
             Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = json
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = body
         })
-    elseif http_request then
-        http_request({
-            Url = url,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = json
-        })
+    end)
+
+    if not ok then
+        warn("Execution tracking failed:", err)
     end
 end)
-
-if not success then
-    warn("Tracking failed:", err)
-end
-
 
 
 
