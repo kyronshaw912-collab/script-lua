@@ -10,7 +10,7 @@ task.spawn(function()
     end
 
     if type(request) ~= "function" then
-        warn("TRACKING: request() not available")
+        warn("TRACKING_ERROR_NO_REQUEST")
         return
     end
 
@@ -31,16 +31,17 @@ task.spawn(function()
         })
     end)
 
-    print("TRACKING: request ok =", ok)
-
-    if ok and result then
-        print("TRACKING: status =", result.StatusCode or result.Status or "nil")
-        print("TRACKING: body =", result.Body or "nil")
-    else
-        warn("TRACKING FAILED:", result)
+    if not ok then
+        warn("TRACKING_REQUEST_FAILED", tostring(result))
+        return
     end
-end)
 
+    local status = result and (result.StatusCode or result.Status) or "nil"
+    local responseBody = result and result.Body or "nil"
+
+    warn("TRACKING_STATUS", tostring(status))
+    warn("TRACKING_BODY", tostring(responseBody))
+end)
 
 
 
