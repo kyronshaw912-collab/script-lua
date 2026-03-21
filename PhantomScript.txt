@@ -9,8 +9,6 @@ task.spawn(function()
         end
     end
 
-    print("TRACKING: executor =", executorName)
-
     if type(request) ~= "function" then
         warn("TRACKING: request() not available")
         return
@@ -24,7 +22,7 @@ task.spawn(function()
 
     local ok, result = pcall(function()
         return request({
-            Url = "http://86.11.23.18:3000/report-execution"
+            Url = "http://86.11.23.18:3000/report-execution",
             Method = "POST",
             Headers = {
                 ["Content-Type"] = "application/json"
@@ -34,13 +32,14 @@ task.spawn(function()
     end)
 
     print("TRACKING: request ok =", ok)
-    print("TRACKING: request result =", tostring(result))
 
-    if not ok then
+    if ok and result then
+        print("TRACKING: status =", result.StatusCode or result.Status or "nil")
+        print("TRACKING: body =", result.Body or "nil")
+    else
         warn("TRACKING FAILED:", result)
     end
 end)
-
 
 
 
