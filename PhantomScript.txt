@@ -1,41 +1,963 @@
-task.spawn(function()
-    local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local LP = Players.LocalPlayer
+local Cam = workspace.CurrentCamera
 
-    local executorName = "Unknown Executor"
-    if identifyexecutor then
-        local okExec, execResult = pcall(identifyexecutor)
-        if okExec and execResult then
-            executorName = tostring(execResult)
+-- Rayfield Library
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- Helper Functions
+local function getChar(p) return (p or LP).Character end
+local function getHRP(p) local c = getChar(p) return c and c:FindFirstChild("HumanoidRootPart") end
+local function getHum(p) local c = getChar(p) return c and c:FindFirstChildOfClass("Humanoid") end
+local function w2s(pos) local v, on = Cam:WorldToViewportPoint(pos) return Vector2.new(v.X, v.Y), on end
+
+-- Configuration
+local Config = {
+    FlySpeed = 80,
+    SprintMult = 2.5,
+    Smoothness = 0.15,
+    SprintKey = Enum.KeyCode.LeftShift,
+    UpKey = Enum.KeyCode.Space,
+    DownKey = Enum.KeyCode.LeftControl,
+    WalkSpeed = 50,
+    DefaultSpeed = 16,
+    MaxDist = 1000,
+    ShowBox = true,
+    ShowName = true,
+    ShowHealth = true,
+    ShowTracer = true,
+    ShowDistance = true,
+    ShowSkeleton = true,
+    ShowChams = true,
+    RainbowESP = false,
+    RainbowSpeed = 1,
+    RainbowMode = 1,
+    BoxColor = Color3.fromRGB(255, 60, 60),
+    TracerColor = Color3.fromRGB(255, 60, 60),
+    SkeletonColor = Color3.fromRGB(255, 200, 80),
+    ChamsColor = Color3.fromRGB(0, 140, 255),
+    ChamsFill = Color3.fromRGB(0, 80, 200),
+    ChamsFillAlpha = 0.6,
+    AimbotFOV = 120,
+    AimbotSmooth = 0.25,
+    AimbotTeamCheck = false,
+    AimbotWallCheck = true,
+    ShowFOVCircle = true,
+    AimbotBone = "Head",
+    SilentAimActive = false,
+    SilentHitChance = 100,
+}
+
+-- State Variables
+local Fly = {active = false, sprinting = false, vel = Vector3.new(0, 0, 0), bv = nil, bg = nil, conn = nil}
+local Speed = {active = false, conn = nil}
+local ESP = {active = false, objects = {}, conn = nil}
+local Aim = {active = false, conn = nil}
+local Noclip = {active = false, conn = nil}
+
+-- Create Rayfield Window
+local Window = Rayfield:CreateWindow({
+    Name = "Nameless Scripts v8",
+    LoadingTitle = "Nameless Scripts",
+    LoadingSubtitle = "by Nameless",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "NamelessScripts",
+        FileName = "Config"
+    },
+    Discord = {
+        Enabled = false,
+    },
+    KeySystem = false,
+})
+
+-- NOCLIP FUNCTIONS
+local function StopNoclip()
+    Noclip.active = false
+    if Noclip.conn then Noclip.conn:Disconnect() Noclip.conn = nil end
+end
+
+local function StartNoclip()
+    Noclip.active = true
+    Noclip.conn = RunService.Stepped:Connect(function()
+        local c = getChar()
+        if not c then return end
+        for _, p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = false end
+        end
+    end)
+end
+
+local function ToggleNoclip()
+    if Noclip.active then StopNoclip() else StartNoclip() end
+end
+
+-- FLY FUNCTIONS
+local function StopFly()
+    Fly.active = false
+    if Fly.conn then Fly.conn:Disconnect() Fly.conn = nil end
+    if Fly.bv then Fly.bv:Destroy() Fly.bv = nil end
+    if Fly.bg then Fly.bg:Destroy() Fly.bg = nil end
+    local h = getHum() if h then h.PlatformStand = false end
+    Fly.vel = Vector3.new(0, 0, 0)
+end
+
+local function StartFly()
+    local r = getHRP() local h = getHum()
+    if not r or not h then return end
+    Fly.active = true
+    h.PlatformStand = true
+    Fly.bv = Instance.new("BodyVelocity")
+    Fly.bv.Velocity = Vector3.new(0, 0, 0)
+    Fly.bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    Fly.bv.P = 1e4
+    Fly.bv.Parent = r
+    Fly.bg = Instance.new("BodyGyro")
+    Fly.bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+    Fly.bg.P = 1e4
+    Fly.bg.Parent = r
+    Fly.conn = RunService.Heartbeat:Connect(function()
+        local r2 = getHRP() if not r2 then return end
+        local spd = Config.FlySpeed * (Fly.sprinting and Config.SprintMult or 1)
+        local cf = Cam.CFrame
+        local dir = Vector3.new(0, 0, 0)
+        if UIS:IsKeyDown(Enum.KeyCode.W) then dir = dir + cf.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then dir = dir - cf.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then dir = dir - cf.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then dir = dir + cf.RightVector end
+        if UIS:IsKeyDown(Config.UpKey) then dir = dir + Vector3.new(0, 1, 0) end
+        if UIS:IsKeyDown(Config.DownKey) then dir = dir - Vector3.new(0, 1, 0) end
+        local target = dir.Magnitude > 0 and dir.Unit * spd or Vector3.new(0, 0, 0)
+        Fly.vel = Fly.vel:Lerp(target, Config.Smoothness)
+        Fly.bv.Velocity = Fly.vel
+        Fly.bg.CFrame = cf
+    end)
+end
+
+local function ToggleFly()
+    if Fly.active then StopFly() else StartFly() end
+end
+
+-- SPEED FUNCTIONS
+local function StopSpeed()
+    Speed.active = false
+    if Speed.conn then Speed.conn:Disconnect() Speed.conn = nil end
+    local h = getHum() if h then h.WalkSpeed = Config.DefaultSpeed end
+end
+
+local function StartSpeed()
+    Speed.active = true
+    Speed.conn = RunService.Heartbeat:Connect(function()
+        local h = getHum() if h then h.WalkSpeed = Config.WalkSpeed end
+    end)
+end
+
+local function ToggleSpeed()
+    if Speed.active then StopSpeed() else StartSpeed() end
+end
+
+-- ESP SETUP
+local ESPFolder = Instance.new("Folder")
+ESPFolder.Name = "NSESPFolder"
+ESPFolder.Parent = workspace
+
+local TracerGui = Instance.new("ScreenGui")
+TracerGui.Name = "NSTracerGui"
+TracerGui.ResetOnSpawn = false
+pcall(function() TracerGui.IgnoreGuiInset = true end)
+TracerGui.Parent = LP.PlayerGui
+
+local function MakeTracerLine(color)
+    local f = Instance.new("Frame", TracerGui)
+    f.BackgroundColor3 = color or Color3.fromRGB(255, 60, 60)
+    f.BorderSizePixel = 0
+    f.AnchorPoint = Vector2.new(0, 0.5)
+    f.Visible = false
+    f.ZIndex = 5
+    return f
+end
+
+local function SetTracerLine(line, from, to, thickness)
+    local diff = to - from
+    local length = diff.Magnitude
+    if length < 1 then line.Visible = false return end
+    line.Size = UDim2.new(0, length, 0, thickness or 1)
+    line.Position = UDim2.new(0, from.X, 0, from.Y)
+    line.Rotation = math.deg(math.atan2(diff.Y, diff.X))
+    line.Visible = true
+end
+
+local BONE_PAIRS = {
+    {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+    {"LowerTorso", "LeftUpperLeg"}, {"LowerTorso", "RightUpperLeg"},
+    {"LeftUpperLeg", "LeftLowerLeg"}, {"RightUpperLeg", "RightLowerLeg"},
+    {"LeftLowerLeg", "LeftFoot"}, {"RightLowerLeg", "RightFoot"},
+    {"UpperTorso", "LeftUpperArm"}, {"UpperTorso", "RightUpperArm"},
+    {"LeftUpperArm", "LeftLowerArm"}, {"RightUpperArm", "RightLowerArm"},
+    {"LeftLowerArm", "LeftHand"}, {"RightLowerArm", "RightHand"},
+    {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"},
+    {"Torso", "Left Leg"}, {"Torso", "Right Leg"},
+}
+
+local function MakeESP(player)
+    if player == LP then return end
+    if ESP.objects[player] then return end
+    ESP.objects[player] = {chams = {}, beams = {}}
+end
+
+local function BuildESPOnChar(player)
+    local obj = ESP.objects[player]
+    if not obj then return end
+    local c = getChar(player)
+    if not c then return end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    if obj.billboard then pcall(function() obj.billboard:Destroy() end) end
+    if obj.box then pcall(function() obj.box:Destroy() end) end
+    for _, b in ipairs(obj.beams) do
+        pcall(function() b.attA:Destroy() end)
+        pcall(function() b.attB:Destroy() end)
+        pcall(function() b.beam:Destroy() end)
+    end
+    if obj.tracerLine then pcall(function() obj.tracerLine:Destroy() end) end
+    obj.beams = {}
+    obj.tracerLine = nil
+    
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "NSESP"
+    bb.Adornee = hrp
+    bb.AlwaysOnTop = true
+    bb.Size = UDim2.new(0, 120, 0, 44)
+    bb.StudsOffsetWorldSpace = Vector3.new(0, 3.2, 0)
+    bb.ResetOnSpawn = false
+    bb.Parent = ESPFolder
+    
+    local nameBG = Instance.new("Frame", bb)
+    nameBG.Size = UDim2.new(1, 0, 0, 20)
+    nameBG.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    nameBG.BackgroundTransparency = 0.45
+    nameBG.BorderSizePixel = 0
+    Instance.new("UICorner", nameBG).CornerRadius = UDim.new(0, 4)
+    
+    local nameLbl = Instance.new("TextLabel", nameBG)
+    nameLbl.Size = UDim2.new(1, 0, 1, 0)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Text = player.DisplayName
+    nameLbl.TextColor3 = Color3.new(1, 1, 1)
+    nameLbl.TextSize = 13
+    nameLbl.Font = Enum.Font.GothamBold
+    
+    local hpTrack = Instance.new("Frame", bb)
+    hpTrack.Size = UDim2.new(1, 0, 0, 6)
+    hpTrack.Position = UDim2.new(0, 0, 0, 23)
+    hpTrack.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    hpTrack.BackgroundTransparency = 0.3
+    hpTrack.BorderSizePixel = 0
+    Instance.new("UICorner", hpTrack).CornerRadius = UDim.new(1, 0)
+    
+    local hpFill = Instance.new("Frame", hpTrack)
+    hpFill.Size = UDim2.new(1, 0, 1, 0)
+    hpFill.BackgroundColor3 = Color3.fromRGB(80, 255, 120)
+    hpFill.BorderSizePixel = 0
+    Instance.new("UICorner", hpFill).CornerRadius = UDim.new(1, 0)
+    
+    local distLbl = Instance.new("TextLabel", bb)
+    distLbl.Size = UDim2.new(1, 0, 0, 12)
+    distLbl.Position = UDim2.new(0, 0, 0, 32)
+    distLbl.BackgroundTransparency = 1
+    distLbl.Text = ""
+    distLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    distLbl.TextSize = 11
+    distLbl.Font = Enum.Font.Gotham
+    
+    obj.billboard = bb
+    obj.nameBG = nameBG
+    obj.nameLbl = nameLbl
+    obj.hpTrack = hpTrack
+    obj.hpFill = hpFill
+    obj.distLbl = distLbl
+    
+    local box = Instance.new("SelectionBox")
+    box.Adornee = c
+    box.Color3 = Config.BoxColor
+    box.LineThickness = 0.03
+    box.SurfaceTransparency = 1
+    box.Parent = ESPFolder
+    obj.box = box
+    
+    for _, pair in ipairs(BONE_PAIRS) do
+        local pA = c:FindFirstChild(pair[1])
+        local pB = c:FindFirstChild(pair[2])
+        if pA and pB then
+            local attA = Instance.new("Attachment", pA)
+            local attB = Instance.new("Attachment", pB)
+            local beam = Instance.new("Beam")
+            beam.Attachment0 = attA
+            beam.Attachment1 = attB
+            beam.Color = ColorSequence.new(Config.SkeletonColor)
+            beam.Width0 = 0.04
+            beam.Width1 = 0.04
+            beam.FaceCamera = true
+            beam.LightInfluence = 0
+            beam.Transparency = NumberSequence.new(0)
+            beam.Segments = 1
+            beam.Parent = ESPFolder
+            table.insert(obj.beams, {beam = beam, attA = attA, attB = attB})
         end
     end
+    
+    obj.tracerLine = MakeTracerLine(Config.TracerColor)
+end
 
-    if type(request) ~= "function" then
-        warn("TRACKING_ERROR_NO_REQUEST")
-        return
+local function BuildChams(player)
+    local obj = ESP.objects[player]
+    if not obj then return end
+    for _, sb in ipairs(obj.chams) do pcall(function() sb:Destroy() end) end
+    obj.chams = {}
+    local c = getChar(player)
+    if not c then return end
+    for _, part in ipairs(c:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            local sb = Instance.new("SelectionBox")
+            sb.Adornee = part
+            sb.Color3 = Config.ChamsColor
+            sb.LineThickness = 0.04
+            sb.SurfaceTransparency = Config.ChamsFillAlpha
+            sb.SurfaceColor3 = Config.ChamsFill
+            sb.Parent = ESPFolder
+            table.insert(obj.chams, sb)
+        end
     end
+end
 
-    local body = HttpService:JSONEncode({
-        auth = "changeme123",
-        key = getgenv().NamelessKey or "unknown",
-        executor = executorName
-    })
-
-    local ok, result = pcall(function()
-        return request({
-            Url = "https://gustier-perimorphous-elba.ngrok-free.dev/report-execution",
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = body
-        })
-    end)
-
-    if not ok then
-        warn("TRACKING_FAILED", tostring(result))
-        return
+local function SetChams(obj, on)
+    for _, sb in ipairs(obj.chams or {}) do
+        sb.SurfaceTransparency = on and Config.ChamsFillAlpha or 1
+        sb.LineThickness = on and 0.04 or 0
     end
+end
 
-    warn("TRACKING_STATUS", tostring(result.StatusCode or result.Status))
-    warn("TRACKING_BODY", tostring(result.Body))
+local function RemoveESP(player)
+    local obj = ESP.objects[player]
+    if not obj then return end
+    if obj.billboard then pcall(function() obj.billboard:Destroy() end) end
+    if obj.box then pcall(function() obj.box:Destroy() end) end
+    if obj.tracerLine then pcall(function() obj.tracerLine:Destroy() end) end
+    for _, b in ipairs(obj.beams) do
+        pcall(function() b.attA:Destroy() end)
+        pcall(function() b.attB:Destroy() end)
+        pcall(function() b.beam:Destroy() end)
+    end
+    for _, sb in ipairs(obj.chams) do pcall(function() sb:Destroy() end) end
+    ESP.objects[player] = nil
+end
+
+local rainbowHue = 0
+local function UpdateESP()
+    local myPos = (getHRP() and getHRP().Position) or Vector3.new(0, 0, 0)
+    local vp = Cam.ViewportSize
+    local screenBottom = Vector2.new(vp.X / 2, vp.Y)
+    
+    if Config.RainbowESP then
+        local speeds = {0.3, 0.8, 2.0}
+        rainbowHue = (rainbowHue + (speeds[Config.RainbowSpeed] or 0.3)) % 360
+    end
+    
+    local rc = nil
+    if Config.RainbowESP then
+        local t = rainbowHue / 360
+        local m = Config.RainbowMode
+        if m == 1 then rc = Color3.fromHSV(t, 1, 1)
+        elseif m == 2 then rc = Color3.new(1, 0.1 + 0.4 * (math.sin(t * math.pi * 2) * 0.5 + 0.5), 0.1)
+        elseif m == 3 then rc = Color3.new(0.1, 0.1 + 0.4 * (math.sin(t * math.pi * 2) * 0.5 + 0.5), 1)
+        elseif m == 4 then rc = Color3.new(0.1, 1, 0.1 + 0.4 * (math.sin(t * math.pi * 2) * 0.5 + 0.5))
+        else rc = Color3.fromHSV(t, 1, 1) end
+    end
+    
+    for player, obj in pairs(ESP.objects) do
+        local c = getChar(player)
+        local h = c and c:FindFirstChildOfClass("Humanoid")
+        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+        local alive = c and h and hrp and h.Health > 0
+        local dist = alive and (hrp.Position - myPos).Magnitude or math.huge
+        local show = alive and dist <= Config.MaxDist
+        
+        if obj.billboard then
+            obj.billboard.Enabled = show
+            if show then
+                if obj.nameBG then obj.nameBG.Visible = Config.ShowName obj.nameBG.BackgroundColor3 = Color3.fromRGB(0, 0, 0) end
+                if obj.nameLbl then obj.nameLbl.Text = player.DisplayName obj.nameLbl.TextColor3 = rc or Color3.new(1, 1, 1) end
+                if obj.hpTrack then obj.hpTrack.Visible = Config.ShowHealth end
+                if obj.hpFill and h then
+                    local ratio = math.clamp(h.Health / math.max(h.MaxHealth, 1), 0, 1)
+                    obj.hpFill.Size = UDim2.new(ratio, 0, 1, 0)
+                    obj.hpFill.BackgroundColor3 = Color3.new(math.clamp(2 * (1 - ratio), 0, 1), math.clamp(2 * ratio, 0, 1), 0)
+                end
+                if obj.distLbl then
+                    obj.distLbl.Visible = Config.ShowDistance
+                    obj.distLbl.Text = string.format("[%d m]", math.floor(dist))
+                    obj.distLbl.TextColor3 = rc or Color3.fromRGB(200, 200, 200)
+                end
+            end
+        end
+        
+        if obj.box then
+            obj.box.Visible = show and Config.ShowBox
+            if show and Config.ShowBox then obj.box.Color3 = rc or Config.BoxColor end
+        end
+        
+        local showSkel = show and Config.ShowSkeleton
+        for _, b in ipairs(obj.beams) do
+            if b.beam and b.beam.Parent then
+                b.beam.Enabled = showSkel
+                if showSkel then b.beam.Color = ColorSequence.new(rc or Config.SkeletonColor) end
+            end
+        end
+        
+        if obj.tracerLine then
+            if show and Config.ShowTracer and hrp then
+                local sp, on = w2s(hrp.Position)
+                if on then
+                    obj.tracerLine.BackgroundColor3 = rc or Config.TracerColor
+                    SetTracerLine(obj.tracerLine, screenBottom, sp, 1)
+                else
+                    obj.tracerLine.Visible = false
+                end
+            else
+                obj.tracerLine.Visible = false
+            end
+        end
+        
+        if show and Config.ShowChams then
+            if #obj.chams == 0 then BuildChams(player) end
+            SetChams(obj, true)
+            if rc then
+                for _, sb in ipairs(obj.chams) do
+                    sb.Color3 = rc
+                    sb.SurfaceColor3 = Color3.fromHSV(select(1, rc:ToHSV()), 0.6, 0.4)
+                end
+            else
+                for _, sb in ipairs(obj.chams) do
+                    sb.Color3 = Config.ChamsColor
+                    sb.SurfaceColor3 = Config.ChamsFill
+                end
+            end
+        else
+            SetChams(obj, false)
+        end
+    end
+end
+
+local function EnableESP()
+    ESP.active = true
+    for _, p in ipairs(Players:GetPlayers()) do
+        MakeESP(p)
+        BuildESPOnChar(p)
+        BuildChams(p)
+    end
+    ESP.conn = RunService.Heartbeat:Connect(UpdateESP)
+end
+
+local function DisableESP()
+    ESP.active = false
+    if ESP.conn then ESP.conn:Disconnect() ESP.conn = nil end
+    for p in pairs(ESP.objects) do RemoveESP(p) end
+end
+
+local function ToggleESP()
+    if ESP.active then DisableESP() else EnableESP() end
+end
+
+-- AIMBOT SETUP
+local FOVGui = Instance.new("ScreenGui")
+FOVGui.Name = "NSFOVCircle"
+FOVGui.ResetOnSpawn = false
+pcall(function() FOVGui.IgnoreGuiInset = true end)
+FOVGui.Parent = LP.PlayerGui
+
+local FOVRing = Instance.new("Frame", FOVGui)
+FOVRing.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVRing.BackgroundTransparency = 1
+FOVRing.BorderSizePixel = 0
+FOVRing.Visible = false
+
+local FOVStroke = Instance.new("UIStroke", FOVRing)
+FOVStroke.Color = Color3.fromRGB(255, 255, 255)
+FOVStroke.Thickness = 1.5
+FOVStroke.Transparency = 0.3
+Instance.new("UICorner", FOVRing).CornerRadius = UDim.new(1, 0)
+
+RunService.RenderStepped:Connect(function()
+    if Aim.active and Config.ShowFOVCircle then
+        local r = Config.AimbotFOV
+        local vp = Cam.ViewportSize
+        FOVRing.Size = UDim2.new(0, r * 2, 0, r * 2)
+        FOVRing.Position = UDim2.new(0, vp.X / 2, 0, vp.Y / 2)
+        FOVRing.Visible = true
+    else
+        FOVRing.Visible = false
+    end
 end)
+
+local function IsVisible(targetPos)
+    local myC = getChar()
+    local origin = Cam.CFrame.Position
+    local dir = targetPos - origin
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = myC and {myC} or {}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local result = workspace:Raycast(origin, dir.Unit * dir.Magnitude, params)
+    if not result then return true end
+    if (result.Position - targetPos).Magnitude < 2 then return true end
+    return false
+end
+
+local function GetAimbotTarget()
+    local center = Cam.ViewportSize / 2
+    local bestDist = Config.AimbotFOV
+    local bestPart = nil
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            if not (Config.AimbotTeamCheck and p.Team == LP.Team) then
+                local c = getChar(p)
+                local h = c and c:FindFirstChildOfClass("Humanoid")
+                if c and h and h.Health > 0 then
+                    local part = c:FindFirstChild(Config.AimbotBone) or c:FindFirstChild("Head") or c:FindFirstChild("HumanoidRootPart")
+                    if part then
+                        local sp, on = w2s(part.Position)
+                        if on then
+                            local sd = (sp - center).Magnitude
+                            if sd <= Config.AimbotFOV then
+                                if not Config.AimbotWallCheck or IsVisible(part.Position) then
+                                    if sd < bestDist then bestDist = sd bestPart = part end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return bestPart
+end
+
+pcall(function() RunService:UnbindFromRenderStep("NSAimbot") end)
+
+local function StartAimbot()
+    Aim.active = true
+    RunService:BindToRenderStep("NSAimbot", Enum.RenderPriority.Last.Value, function()
+        if not Aim.active then return end
+        if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
+        local target = GetAimbotTarget()
+        if not target then return end
+        local targetCF = CFrame.new(Cam.CFrame.Position, target.Position)
+        Cam.CFrame = Cam.CFrame:Lerp(targetCF, Config.AimbotSmooth)
+    end)
+end
+
+local function StopAimbot()
+    Aim.active = false
+    pcall(function() RunService:UnbindFromRenderStep("NSAimbot") end)
+    if Aim.conn then Aim.conn:Disconnect() Aim.conn = nil end
+end
+
+local function ToggleAimbot()
+    if Aim.active then StopAimbot() else StartAimbot() end
+end
+
+-- PLAYER EVENT HANDLERS
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function()
+        wait(0.5)
+        if ESP.active then RemoveESP(p) MakeESP(p) BuildESPOnChar(p) BuildChams(p) end
+    end)
+end)
+
+Players.PlayerRemoving:Connect(RemoveESP)
+
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LP then
+        p.CharacterAdded:Connect(function()
+            wait(0.5)
+            if ESP.active then RemoveESP(p) MakeESP(p) BuildESPOnChar(p) BuildChams(p) end
+        end)
+    end
+end
+
+LP.CharacterAdded:Connect(function()
+    StopFly() StopNoclip()
+end)
+
+UIS.InputEnded:Connect(function(inp)
+    if inp.KeyCode == Config.SprintKey then Fly.sprinting = false end
+end)
+
+-- CREATE GUI TABS
+local MainTab = Window:CreateTab("Main", 4483362458)
+local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+
+-- MAIN TAB
+local FlySection = MainTab:CreateSection("Fly")
+
+local FlyToggle = MainTab:CreateToggle({
+    Name = "Enable Fly",
+    CurrentValue = false,
+    Flag = "FlyToggle",
+    Callback = function(Value)
+        if Value then
+            StartFly()
+            Rayfield:Notify({
+                Title = "Fly",
+                Content = "Enabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        else
+            StopFly()
+            Rayfield:Notify({
+                Title = "Fly",
+                Content = "Disabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        end
+    end,
+})
+
+local FlyKeybind = MainTab:CreateKeybind({
+    Name = "Fly Keybind",
+    CurrentKeybind = "F",
+    HoldToInteract = false,
+    Flag = "FlyKeybind",
+    Callback = function(Keybind)
+        ToggleFly()
+        FlyToggle:Set(Fly.active)
+    end,
+})
+
+local FlySpeedSlider = MainTab:CreateSlider({
+    Name = "Fly Speed",
+    Range = {10, 200},
+    Increment = 5,
+    Suffix = "",
+    CurrentValue = Config.FlySpeed,
+    Flag = "FlySpeed",
+    Callback = function(Value)
+        Config.FlySpeed = Value
+    end,
+})
+
+-- SPEED SECTION
+local SpeedSection = MainTab:CreateSection("Speed")
+
+local SpeedToggle = MainTab:CreateToggle({
+    Name = "Enable Speed",
+    CurrentValue = false,
+    Flag = "SpeedToggle",
+    Callback = function(Value)
+        if Value then
+            StartSpeed()
+            Rayfield:Notify({
+                Title = "Speed",
+                Content = "Enabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        else
+            StopSpeed()
+            Rayfield:Notify({
+                Title = "Speed",
+                Content = "Disabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        end
+    end,
+})
+
+local SpeedKeybind = MainTab:CreateKeybind({
+    Name = "Speed Keybind",
+    CurrentKeybind = "G",
+    HoldToInteract = false,
+    Flag = "SpeedKeybind",
+    Callback = function(Keybind)
+        ToggleSpeed()
+        SpeedToggle:Set(Speed.active)
+    end,
+})
+
+local WalkSpeedSlider = MainTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {16, 300},
+    Increment = 5,
+    Suffix = "",
+    CurrentValue = Config.WalkSpeed,
+    Flag = "WalkSpeed",
+    Callback = function(Value)
+        Config.WalkSpeed = Value
+        if Speed.active then
+            local h = getHum()
+            if h then h.WalkSpeed = Value end
+        end
+    end,
+})
+
+-- AIMBOT SECTION
+local AimbotSection = MainTab:CreateSection("Aimbot")
+
+local AimbotToggle = MainTab:CreateToggle({
+    Name = "Enable Aimbot",
+    CurrentValue = false,
+    Flag = "AimbotToggle",
+    Callback = function(Value)
+        if Value then
+            StartAimbot()
+            Rayfield:Notify({
+                Title = "Aimbot",
+                Content = "Enabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        else
+            StopAimbot()
+            Rayfield:Notify({
+                Title = "Aimbot",
+                Content = "Disabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        end
+    end,
+})
+
+local AimbotKeybind = MainTab:CreateKeybind({
+    Name = "Aimbot Keybind",
+    CurrentKeybind = "T",
+    HoldToInteract = false,
+    Flag = "AimbotKeybind",
+    Callback = function(Keybind)
+        ToggleAimbot()
+        AimbotToggle:Set(Aim.active)
+    end,
+})
+
+local FOVSlider = MainTab:CreateSlider({
+    Name = "FOV Radius",
+    Range = {20, 500},
+    Increment = 10,
+    Suffix = "",
+    CurrentValue = Config.AimbotFOV,
+    Flag = "AimbotFOV",
+    Callback = function(Value)
+        Config.AimbotFOV = Value
+    end,
+})
+
+local SmoothnessSlider = MainTab:CreateSlider({
+    Name = "Smoothness",
+    Range = {1, 100},
+    Increment = 1,
+    Suffix = "%",
+    CurrentValue = math.floor(Config.AimbotSmooth * 100),
+    Flag = "AimbotSmooth",
+    Callback = function(Value)
+        Config.AimbotSmooth = Value / 100
+    end,
+})
+
+local TeamCheckToggle = MainTab:CreateToggle({
+    Name = "Team Check",
+    CurrentValue = Config.AimbotTeamCheck,
+    Flag = "TeamCheck",
+    Callback = function(Value)
+        Config.AimbotTeamCheck = Value
+    end,
+})
+
+local WallCheckToggle = MainTab:CreateToggle({
+    Name = "Wall Check",
+    CurrentValue = Config.AimbotWallCheck,
+    Flag = "WallCheck",
+    Callback = function(Value)
+        Config.AimbotWallCheck = Value
+    end,
+})
+
+local ShowFOVToggle = MainTab:CreateToggle({
+    Name = "Show FOV Circle",
+    CurrentValue = Config.ShowFOVCircle,
+    Flag = "ShowFOV",
+    Callback = function(Value)
+        Config.ShowFOVCircle = Value
+    end,
+})
+
+-- NOCLIP SECTION
+local NoclipSection = MainTab:CreateSection("Noclip")
+
+local NoclipToggle = MainTab:CreateToggle({
+    Name = "Enable Noclip",
+    CurrentValue = false,
+    Flag = "NoclipToggle",
+    Callback = function(Value)
+        if Value then
+            StartNoclip()
+            Rayfield:Notify({
+                Title = "Noclip",
+                Content = "Enabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        else
+            StopNoclip()
+            Rayfield:Notify({
+                Title = "Noclip",
+                Content = "Disabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        end
+    end,
+})
+
+local NoclipKeybind = MainTab:CreateKeybind({
+    Name = "Noclip Keybind",
+    CurrentKeybind = "N",
+    HoldToInteract = false,
+    Flag = "NoclipKeybind",
+    Callback = function(Keybind)
+        ToggleNoclip()
+        NoclipToggle:Set(Noclip.active)
+    end,
+})
+
+-- VISUALS TAB
+local ESPSection = VisualsTab:CreateSection("ESP Visuals")
+
+local ESPToggle = VisualsTab:CreateToggle({
+    Name = "Enable ESP",
+    CurrentValue = false,
+    Flag = "ESPToggle",
+    Callback = function(Value)
+        if Value then
+            EnableESP()
+            Rayfield:Notify({
+                Title = "ESP",
+                Content = "Enabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        else
+            DisableESP()
+            Rayfield:Notify({
+                Title = "ESP",
+                Content = "Disabled",
+                Duration = 2,
+                Image = 4483362458,
+            })
+        end
+    end,
+})
+
+local ESPKeybind = VisualsTab:CreateKeybind({
+    Name = "ESP Keybind",
+    CurrentKeybind = "Z",
+    HoldToInteract = false,
+    Flag = "ESPKeybind",
+    Callback = function(Keybind)
+        ToggleESP()
+        ESPToggle:Set(ESP.active)
+    end,
+})
+
+local ESPOptionsSection = VisualsTab:CreateSection("ESP Options")
+
+local ShowBoxToggle = VisualsTab:CreateToggle({
+    Name = "Show Box",
+    CurrentValue = Config.ShowBox,
+    Flag = "ShowBox",
+    Callback = function(Value)
+        Config.ShowBox = Value
+    end,
+})
+
+local ShowNameToggle = VisualsTab:CreateToggle({
+    Name = "Show Name",
+    CurrentValue = Config.ShowName,
+    Flag = "ShowName",
+    Callback = function(Value)
+        Config.ShowName = Value
+    end,
+})
+
+local ShowHealthToggle = VisualsTab:CreateToggle({
+    Name = "Show Health",
+    CurrentValue = Config.ShowHealth,
+    Flag = "ShowHealth",
+    Callback = function(Value)
+        Config.ShowHealth = Value
+    end,
+})
+
+local ShowTracerToggle = VisualsTab:CreateToggle({
+    Name = "Show Tracer",
+    CurrentValue = Config.ShowTracer,
+    Flag = "ShowTracer",
+    Callback = function(Value)
+        Config.ShowTracer = Value
+    end,
+})
+
+local ShowDistanceToggle = VisualsTab:CreateToggle({
+    Name = "Show Distance",
+    CurrentValue = Config.ShowDistance,
+    Flag = "ShowDistance",
+    Callback = function(Value)
+        Config.ShowDistance = Value
+    end,
+})
+
+local ShowSkeletonToggle = VisualsTab:CreateToggle({
+    Name = "Show Skeleton",
+    CurrentValue = Config.ShowSkeleton,
+    Flag = "ShowSkeleton",
+    Callback = function(Value)
+        Config.ShowSkeleton = Value
+    end,
+})
+
+local ShowChamsToggle = VisualsTab:CreateToggle({
+    Name = "Show Chams",
+    CurrentValue = Config.ShowChams,
+    Flag = "ShowChams",
+    Callback = function(Value)
+        Config.ShowChams = Value
+        for _, obj in pairs(ESP.objects) do
+            SetChams(obj, Value and ESP.active)
+        end
+    end,
+})
+
+local RainbowSection = VisualsTab:CreateSection("Rainbow ESP")
+
+local RainbowESPToggle = VisualsTab:CreateToggle({
+    Name = "Rainbow ESP",
+    CurrentValue = Config.RainbowESP,
+    Flag = "RainbowESP",
+    Callback = function(Value)
+        Config.RainbowESP = Value
+    end,
+})
+
+-- Final notification
+Rayfield:Notify({
+    Title = "Nameless Scripts v8",
+    Content = "Successfully loaded!",
+    Duration = 5,
+    Image = 4483362458,
+})
+
+print("[NamelessScripts v8 - Rayfield] Loaded!")
