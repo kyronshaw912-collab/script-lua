@@ -25,21 +25,37 @@ local Config = {
     DefaultSpeed = 16,
     MaxDist = 1000,
     ShowBox = true,
+    BoxType = "3D", -- "3D" or "2D"
+    BoxFilled = false,
+    BoxOutline = true,
     ShowName = true,
     ShowHealth = true,
+    ShowHealthText = true,
     ShowTracer = true,
+    TracerFrom = "Bottom", -- "Bottom", "Center", "Mouse"
     ShowDistance = true,
     ShowSkeleton = true,
     ShowChams = true,
+    ShowHeadDot = true,
+    ShowLookDirection = false,
+    ShowWeapon = false,
+    DistanceColors = true,
+    TeamColor = false,
     RainbowESP = false,
     RainbowSpeed = 1,
     RainbowMode = 1,
     BoxColor = Color3.fromRGB(255, 60, 60),
+    BoxFillColor = Color3.fromRGB(255, 60, 60),
+    BoxFillTransparency = 0.7,
     TracerColor = Color3.fromRGB(255, 60, 60),
     SkeletonColor = Color3.fromRGB(255, 200, 80),
     ChamsColor = Color3.fromRGB(0, 140, 255),
     ChamsFill = Color3.fromRGB(0, 80, 200),
     ChamsFillAlpha = 0.6,
+    HeadDotColor = Color3.fromRGB(255, 100, 100),
+    NearColor = Color3.fromRGB(255, 50, 50),
+    MidColor = Color3.fromRGB(255, 200, 50),
+    FarColor = Color3.fromRGB(50, 255, 100),
     AimbotFOV = 120,
     AimbotSmooth = 0.25,
     AimbotTeamCheck = false,
@@ -56,22 +72,6 @@ local Speed = {active = false, conn = nil}
 local ESP = {active = false, objects = {}, conn = nil}
 local Aim = {active = false, conn = nil}
 local Noclip = {active = false, conn = nil}
-
--- Create Rayfield Window
-local Window = Rayfield:CreateWindow({
-    Name = "Nameless Scripts v8",
-    LoadingTitle = "Nameless Scripts",
-    LoadingSubtitle = "by Nameless",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "NamelessScripts",
-        FileName = "Config"
-    },
-    Discord = {
-        Enabled = false,
-    },
-    KeySystem = false,
-})
 
 -- NOCLIP FUNCTIONS
 local function StopNoclip()
@@ -179,13 +179,14 @@ local function MakeTracerLine(color)
     return f
 end
 
-local function SetTracerLine(line, from, to, thickness)
+local function SetTracerLine(line, from, to, thickness, color)
     local diff = to - from
     local length = diff.Magnitude
     if length < 1 then line.Visible = false return end
-    line.Size = UDim2.new(0, length, 0, thickness or 1)
+    line.Size = UDim2.new(0, length, 0, thickness or 2)
     line.Position = UDim2.new(0, from.X, 0, from.Y)
     line.Rotation = math.deg(math.atan2(diff.Y, diff.X))
+    if color then line.BackgroundColor3 = color end
     line.Visible = true
 end
 
@@ -201,10 +202,21 @@ local BONE_PAIRS = {
     {"Torso", "Left Leg"}, {"Torso", "Right Leg"},
 }
 
+local function GetDistanceColor(dist)
+    if not Config.DistanceColors then return nil end
+    if dist < 100 then
+        return Config.NearColor
+    elseif dist < 300 then
+        return Config.MidColor
+    else
+        return Config.FarColor
+    end
+end
+
 local function MakeESP(player)
     if player == LP then return end
     if ESP.objects[player] then return end
-    ESP.objects[player] = {chams = {}, beams = {}}
+    ESP.objects[player] = {chams = {}, beams = {}, drawings2d = {}}
 end
 
 local function BuildESPOnChar(player)
@@ -215,48 +227,69 @@ local function BuildESPOnChar(player)
     local hrp = c:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
+    -- Clean up old objects
     if obj.billboard then pcall(function() obj.billboard:Destroy() end) end
     if obj.box then pcall(function() obj.box:Destroy() end) end
+    if obj.headDot then pcall(function() obj.headDot:Destroy() end) end
     for _, b in ipairs(obj.beams) do
         pcall(function() b.attA:Destroy() end)
         pcall(function() b.attB:Destroy() end)
         pcall(function() b.beam:Destroy() end)
     end
     if obj.tracerLine then pcall(function() obj.tracerLine:Destroy() end) end
+    for _, d in ipairs(obj.drawings2d or {}) do
+        pcall(function() d:Destroy() end)
+    end
     obj.beams = {}
     obj.tracerLine = nil
+    obj.drawings2d = {}
     
+    -- Billboard GUI (Name, Health, Distance)
     local bb = Instance.new("BillboardGui")
     bb.Name = "NSESP"
     bb.Adornee = hrp
     bb.AlwaysOnTop = true
-    bb.Size = UDim2.new(0, 120, 0, 44)
-    bb.StudsOffsetWorldSpace = Vector3.new(0, 3.2, 0)
+    bb.Size = UDim2.new(0, 150, 0, 60)
+    bb.StudsOffsetWorldSpace = Vector3.new(0, 3.5, 0)
     bb.ResetOnSpawn = false
     bb.Parent = ESPFolder
     
+    -- Name background with outline
     local nameBG = Instance.new("Frame", bb)
-    nameBG.Size = UDim2.new(1, 0, 0, 20)
+    nameBG.Size = UDim2.new(1, 0, 0, 22)
     nameBG.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    nameBG.BackgroundTransparency = 0.45
+    nameBG.BackgroundTransparency = 0.35
     nameBG.BorderSizePixel = 0
-    Instance.new("UICorner", nameBG).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", nameBG).CornerRadius = UDim.new(0, 5)
+    
+    local nameStroke = Instance.new("UIStroke", nameBG)
+    nameStroke.Color = Color3.fromRGB(255, 255, 255)
+    nameStroke.Thickness = 1
+    nameStroke.Transparency = 0.7
     
     local nameLbl = Instance.new("TextLabel", nameBG)
     nameLbl.Size = UDim2.new(1, 0, 1, 0)
     nameLbl.BackgroundTransparency = 1
     nameLbl.Text = player.DisplayName
     nameLbl.TextColor3 = Color3.new(1, 1, 1)
-    nameLbl.TextSize = 13
+    nameLbl.TextSize = 14
     nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.TextStrokeTransparency = 0.5
+    nameLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
     
+    -- Health bar with better styling
     local hpTrack = Instance.new("Frame", bb)
-    hpTrack.Size = UDim2.new(1, 0, 0, 6)
-    hpTrack.Position = UDim2.new(0, 0, 0, 23)
-    hpTrack.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    hpTrack.BackgroundTransparency = 0.3
+    hpTrack.Size = UDim2.new(1, 0, 0, 8)
+    hpTrack.Position = UDim2.new(0, 0, 0, 26)
+    hpTrack.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    hpTrack.BackgroundTransparency = 0.2
     hpTrack.BorderSizePixel = 0
     Instance.new("UICorner", hpTrack).CornerRadius = UDim.new(1, 0)
+    
+    local hpStroke = Instance.new("UIStroke", hpTrack)
+    hpStroke.Color = Color3.fromRGB(255, 255, 255)
+    hpStroke.Thickness = 1
+    hpStroke.Transparency = 0.8
     
     local hpFill = Instance.new("Frame", hpTrack)
     hpFill.Size = UDim2.new(1, 0, 1, 0)
@@ -264,30 +297,68 @@ local function BuildESPOnChar(player)
     hpFill.BorderSizePixel = 0
     Instance.new("UICorner", hpFill).CornerRadius = UDim.new(1, 0)
     
+    -- Health text
+    local hpText = Instance.new("TextLabel", bb)
+    hpText.Size = UDim2.new(1, 0, 0, 14)
+    hpText.Position = UDim2.new(0, 0, 0, 38)
+    hpText.BackgroundTransparency = 1
+    hpText.Text = "100 HP"
+    hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    hpText.TextSize = 12
+    hpText.Font = Enum.Font.GothamBold
+    hpText.TextStrokeTransparency = 0.5
+    hpText.TextStrokeColor3 = Color3.new(0, 0, 0)
+    
+    -- Distance label
     local distLbl = Instance.new("TextLabel", bb)
-    distLbl.Size = UDim2.new(1, 0, 0, 12)
-    distLbl.Position = UDim2.new(0, 0, 0, 32)
+    distLbl.Size = UDim2.new(1, 0, 0, 14)
+    distLbl.Position = UDim2.new(0, 0, 0, 52)
     distLbl.BackgroundTransparency = 1
     distLbl.Text = ""
     distLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
     distLbl.TextSize = 11
     distLbl.Font = Enum.Font.Gotham
+    distLbl.TextStrokeTransparency = 0.5
+    distLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
     
     obj.billboard = bb
     obj.nameBG = nameBG
+    obj.nameStroke = nameStroke
     obj.nameLbl = nameLbl
     obj.hpTrack = hpTrack
     obj.hpFill = hpFill
+    obj.hpText = hpText
     obj.distLbl = distLbl
     
-    local box = Instance.new("SelectionBox")
-    box.Adornee = c
-    box.Color3 = Config.BoxColor
-    box.LineThickness = 0.03
-    box.SurfaceTransparency = 1
-    box.Parent = ESPFolder
-    obj.box = box
+    -- 3D Box
+    if Config.BoxType == "3D" then
+        local box = Instance.new("SelectionBox")
+        box.Adornee = c
+        box.Color3 = Config.BoxColor
+        box.LineThickness = 0.04
+        box.SurfaceTransparency = Config.BoxFilled and Config.BoxFillTransparency or 1
+        box.SurfaceColor3 = Config.BoxFillColor
+        box.Parent = ESPFolder
+        obj.box = box
+    end
     
+    -- Head Dot
+    if Config.ShowHeadDot then
+        local head = c:FindFirstChild("Head")
+        if head then
+            local headDot = Instance.new("SphereHandleAdornment")
+            headDot.Adornee = head
+            headDot.Color3 = Config.HeadDotColor
+            headDot.AlwaysOnTop = true
+            headDot.ZIndex = 10
+            headDot.Size = Vector3.new(0.5, 0.5, 0.5)
+            headDot.Transparency = 0.3
+            headDot.Parent = ESPFolder
+            obj.headDot = headDot
+        end
+    end
+    
+    -- Skeleton
     for _, pair in ipairs(BONE_PAIRS) do
         local pA = c:FindFirstChild(pair[1])
         local pB = c:FindFirstChild(pair[2])
@@ -298,8 +369,8 @@ local function BuildESPOnChar(player)
             beam.Attachment0 = attA
             beam.Attachment1 = attB
             beam.Color = ColorSequence.new(Config.SkeletonColor)
-            beam.Width0 = 0.04
-            beam.Width1 = 0.04
+            beam.Width0 = 0.06
+            beam.Width1 = 0.06
             beam.FaceCamera = true
             beam.LightInfluence = 0
             beam.Transparency = NumberSequence.new(0)
@@ -309,6 +380,7 @@ local function BuildESPOnChar(player)
         end
     end
     
+    -- Tracer line
     obj.tracerLine = MakeTracerLine(Config.TracerColor)
 end
 
@@ -324,7 +396,7 @@ local function BuildChams(player)
             local sb = Instance.new("SelectionBox")
             sb.Adornee = part
             sb.Color3 = Config.ChamsColor
-            sb.LineThickness = 0.04
+            sb.LineThickness = 0.05
             sb.SurfaceTransparency = Config.ChamsFillAlpha
             sb.SurfaceColor3 = Config.ChamsFill
             sb.Parent = ESPFolder
@@ -336,7 +408,7 @@ end
 local function SetChams(obj, on)
     for _, sb in ipairs(obj.chams or {}) do
         sb.SurfaceTransparency = on and Config.ChamsFillAlpha or 1
-        sb.LineThickness = on and 0.04 or 0
+        sb.LineThickness = on and 0.05 or 0
     end
 end
 
@@ -345,6 +417,7 @@ local function RemoveESP(player)
     if not obj then return end
     if obj.billboard then pcall(function() obj.billboard:Destroy() end) end
     if obj.box then pcall(function() obj.box:Destroy() end) end
+    if obj.headDot then pcall(function() obj.headDot:Destroy() end) end
     if obj.tracerLine then pcall(function() obj.tracerLine:Destroy() end) end
     for _, b in ipairs(obj.beams) do
         pcall(function() b.attA:Destroy() end)
@@ -352,6 +425,9 @@ local function RemoveESP(player)
         pcall(function() b.beam:Destroy() end)
     end
     for _, sb in ipairs(obj.chams) do pcall(function() sb:Destroy() end) end
+    for _, d in ipairs(obj.drawings2d or {}) do
+        pcall(function() d:Destroy() end)
+    end
     ESP.objects[player] = nil
 end
 
@@ -359,7 +435,14 @@ local rainbowHue = 0
 local function UpdateESP()
     local myPos = (getHRP() and getHRP().Position) or Vector3.new(0, 0, 0)
     local vp = Cam.ViewportSize
-    local screenBottom = Vector2.new(vp.X / 2, vp.Y)
+    local tracerOrigin
+    if Config.TracerFrom == "Bottom" then
+        tracerOrigin = Vector2.new(vp.X / 2, vp.Y)
+    elseif Config.TracerFrom == "Center" then
+        tracerOrigin = Vector2.new(vp.X / 2, vp.Y / 2)
+    else
+        tracerOrigin = UIS:GetMouseLocation()
+    end
     
     if Config.RainbowESP then
         local speeds = {0.3, 0.8, 2.0}
@@ -385,35 +468,72 @@ local function UpdateESP()
         local dist = alive and (hrp.Position - myPos).Magnitude or math.huge
         local show = alive and dist <= Config.MaxDist
         
+        -- Get appropriate color
+        local teamCol = Config.TeamColor and player.Team and player.Team.TeamColor.Color
+        local distCol = GetDistanceColor(dist)
+        local finalColor = rc or teamCol or distCol or Config.BoxColor
+        
         if obj.billboard then
             obj.billboard.Enabled = show
             if show then
-                if obj.nameBG then obj.nameBG.Visible = Config.ShowName obj.nameBG.BackgroundColor3 = Color3.fromRGB(0, 0, 0) end
-                if obj.nameLbl then obj.nameLbl.Text = player.DisplayName obj.nameLbl.TextColor3 = rc or Color3.new(1, 1, 1) end
-                if obj.hpTrack then obj.hpTrack.Visible = Config.ShowHealth end
+                if obj.nameBG then
+                    obj.nameBG.Visible = Config.ShowName
+                    obj.nameBG.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                end
+                if obj.nameStroke then
+                    obj.nameStroke.Color = finalColor
+                end
+                if obj.nameLbl then
+                    obj.nameLbl.Text = player.DisplayName
+                    obj.nameLbl.TextColor3 = finalColor
+                end
+                if obj.hpTrack then
+                    obj.hpTrack.Visible = Config.ShowHealth
+                end
                 if obj.hpFill and h then
                     local ratio = math.clamp(h.Health / math.max(h.MaxHealth, 1), 0, 1)
                     obj.hpFill.Size = UDim2.new(ratio, 0, 1, 0)
-                    obj.hpFill.BackgroundColor3 = Color3.new(math.clamp(2 * (1 - ratio), 0, 1), math.clamp(2 * ratio, 0, 1), 0)
+                    obj.hpFill.BackgroundColor3 = Color3.new(
+                        math.clamp(2 * (1 - ratio), 0, 1),
+                        math.clamp(2 * ratio, 0, 1),
+                        0
+                    )
+                end
+                if obj.hpText and h then
+                    obj.hpText.Visible = Config.ShowHealthText
+                    obj.hpText.Text = string.format("%d HP", math.floor(h.Health))
+                    obj.hpText.TextColor3 = finalColor
                 end
                 if obj.distLbl then
                     obj.distLbl.Visible = Config.ShowDistance
-                    obj.distLbl.Text = string.format("[%d m]", math.floor(dist))
-                    obj.distLbl.TextColor3 = rc or Color3.fromRGB(200, 200, 200)
+                    obj.distLbl.Text = string.format("[%d studs]", math.floor(dist))
+                    obj.distLbl.TextColor3 = finalColor
                 end
             end
         end
         
         if obj.box then
-            obj.box.Visible = show and Config.ShowBox
-            if show and Config.ShowBox then obj.box.Color3 = rc or Config.BoxColor end
+            obj.box.Visible = show and Config.ShowBox and Config.BoxType == "3D"
+            if show and Config.ShowBox then
+                obj.box.Color3 = finalColor
+                obj.box.SurfaceColor3 = finalColor
+            end
+        end
+        
+        if obj.headDot then
+            obj.headDot.Visible = show and Config.ShowHeadDot
+            if show and Config.ShowHeadDot then
+                obj.headDot.Color3 = finalColor
+            end
         end
         
         local showSkel = show and Config.ShowSkeleton
         for _, b in ipairs(obj.beams) do
             if b.beam and b.beam.Parent then
                 b.beam.Enabled = showSkel
-                if showSkel then b.beam.Color = ColorSequence.new(rc or Config.SkeletonColor) end
+                if showSkel then
+                    b.beam.Color = ColorSequence.new(finalColor)
+                end
             end
         end
         
@@ -421,8 +541,7 @@ local function UpdateESP()
             if show and Config.ShowTracer and hrp then
                 local sp, on = w2s(hrp.Position)
                 if on then
-                    obj.tracerLine.BackgroundColor3 = rc or Config.TracerColor
-                    SetTracerLine(obj.tracerLine, screenBottom, sp, 1)
+                    SetTracerLine(obj.tracerLine, tracerOrigin, sp, 2, finalColor)
                 else
                     obj.tracerLine.Visible = false
                 end
@@ -434,16 +553,9 @@ local function UpdateESP()
         if show and Config.ShowChams then
             if #obj.chams == 0 then BuildChams(player) end
             SetChams(obj, true)
-            if rc then
-                for _, sb in ipairs(obj.chams) do
-                    sb.Color3 = rc
-                    sb.SurfaceColor3 = Color3.fromHSV(select(1, rc:ToHSV()), 0.6, 0.4)
-                end
-            else
-                for _, sb in ipairs(obj.chams) do
-                    sb.Color3 = Config.ChamsColor
-                    sb.SurfaceColor3 = Config.ChamsFill
-                end
+            for _, sb in ipairs(obj.chams) do
+                sb.Color3 = finalColor
+                sb.SurfaceColor3 = Color3.fromHSV(select(1, finalColor:ToHSV()), 0.6, 0.4)
             end
         else
             SetChams(obj, false)
@@ -486,7 +598,7 @@ FOVRing.Visible = false
 
 local FOVStroke = Instance.new("UIStroke", FOVRing)
 FOVStroke.Color = Color3.fromRGB(255, 255, 255)
-FOVStroke.Thickness = 1.5
+FOVStroke.Thickness = 2
 FOVStroke.Transparency = 0.3
 Instance.new("UICorner", FOVRing).CornerRadius = UDim.new(1, 0)
 
@@ -596,8 +708,24 @@ UIS.InputEnded:Connect(function(inp)
 end)
 
 -- CREATE GUI TABS
+local Window = Rayfield:CreateWindow({
+    Name = "Nameless Scripts v8.5 Enhanced",
+    LoadingTitle = "Nameless Scripts Enhanced",
+    LoadingSubtitle = "by Nameless",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "NamelessScripts",
+        FileName = "ConfigEnhanced"
+    },
+    Discord = {
+        Enabled = false,
+    },
+    KeySystem = false,
+})
+
 local MainTab = Window:CreateTab("Main", 4483362458)
 local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+local ESPSettingsTab = Window:CreateTab("ESP Settings", 4483362458)
 
 -- MAIN TAB
 local FlySection = MainTab:CreateSection("Fly")
@@ -894,11 +1022,20 @@ local ShowNameToggle = VisualsTab:CreateToggle({
 })
 
 local ShowHealthToggle = VisualsTab:CreateToggle({
-    Name = "Show Health",
+    Name = "Show Health Bar",
     CurrentValue = Config.ShowHealth,
     Flag = "ShowHealth",
     Callback = function(Value)
         Config.ShowHealth = Value
+    end,
+})
+
+local ShowHealthTextToggle = VisualsTab:CreateToggle({
+    Name = "Show Health Text",
+    CurrentValue = Config.ShowHealthText,
+    Flag = "ShowHealthText",
+    Callback = function(Value)
+        Config.ShowHealthText = Value
     end,
 })
 
@@ -941,9 +1078,39 @@ local ShowChamsToggle = VisualsTab:CreateToggle({
     end,
 })
 
-local RainbowSection = VisualsTab:CreateSection("Rainbow ESP")
+local ShowHeadDotToggle = VisualsTab:CreateToggle({
+    Name = "Show Head Dot",
+    CurrentValue = Config.ShowHeadDot,
+    Flag = "ShowHeadDot",
+    Callback = function(Value)
+        Config.ShowHeadDot = Value
+    end,
+})
 
-local RainbowESPToggle = VisualsTab:CreateToggle({
+-- ESP SETTINGS TAB
+local ColorSection = ESPSettingsTab:CreateSection("Color Settings")
+
+local DistanceColorsToggle = ESPSettingsTab:CreateToggle({
+    Name = "Distance-Based Colors",
+    CurrentValue = Config.DistanceColors,
+    Flag = "DistanceColors",
+    Callback = function(Value)
+        Config.DistanceColors = Value
+    end,
+})
+
+local TeamColorToggle = ESPSettingsTab:CreateToggle({
+    Name = "Team Colors",
+    CurrentValue = Config.TeamColor,
+    Flag = "TeamColor",
+    Callback = function(Value)
+        Config.TeamColor = Value
+    end,
+})
+
+local RainbowSection = ESPSettingsTab:CreateSection("Rainbow ESP")
+
+local RainbowESPToggle = ESPSettingsTab:CreateToggle({
     Name = "Rainbow ESP",
     CurrentValue = Config.RainbowESP,
     Flag = "RainbowESP",
@@ -952,12 +1119,69 @@ local RainbowESPToggle = VisualsTab:CreateToggle({
     end,
 })
 
+local RainbowSpeedSlider = ESPSettingsTab:CreateSlider({
+    Name = "Rainbow Speed",
+    Range = {1, 3},
+    Increment = 1,
+    Suffix = "",
+    CurrentValue = Config.RainbowSpeed,
+    Flag = "RainbowSpeed",
+    Callback = function(Value)
+        Config.RainbowSpeed = Value
+    end,
+})
+
+local TracerSection = ESPSettingsTab:CreateSection("Tracer Settings")
+
+local TracerFromDropdown = ESPSettingsTab:CreateDropdown({
+    Name = "Tracer Origin",
+    Options = {"Bottom", "Center", "Mouse"},
+    CurrentOption = Config.TracerFrom,
+    Flag = "TracerFrom",
+    Callback = function(Option)
+        Config.TracerFrom = Option
+    end,
+})
+
+local BoxSection = ESPSettingsTab:CreateSection("Box Settings")
+
+local BoxFilledToggle = ESPSettingsTab:CreateToggle({
+    Name = "Filled Box",
+    CurrentValue = Config.BoxFilled,
+    Flag = "BoxFilled",
+    Callback = function(Value)
+        Config.BoxFilled = Value
+        for _, obj in pairs(ESP.objects) do
+            if obj.box then
+                obj.box.SurfaceTransparency = Value and Config.BoxFillTransparency or 1
+            end
+        end
+    end,
+})
+
+local BoxTransparencySlider = ESPSettingsTab:CreateSlider({
+    Name = "Box Fill Transparency",
+    Range = {0, 100},
+    Increment = 5,
+    Suffix = "%",
+    CurrentValue = math.floor(Config.BoxFillTransparency * 100),
+    Flag = "BoxFillTransparency",
+    Callback = function(Value)
+        Config.BoxFillTransparency = Value / 100
+        for _, obj in pairs(ESP.objects) do
+            if obj.box and Config.BoxFilled then
+                obj.box.SurfaceTransparency = Value / 100
+            end
+        end
+    end,
+})
+
 -- Final notification
 Rayfield:Notify({
-    Title = "Nameless Scripts v8",
-    Content = "Successfully loaded!",
+    Title = "Nameless Scripts v8.5",
+    Content = "Enhanced ESP loaded successfully!",
     Duration = 5,
     Image = 4483362458,
 })
 
-print("[NamelessScripts v8 - Rayfield] Loaded!")
+print("[NamelessScripts v8.5 Enhanced] Loaded!")
